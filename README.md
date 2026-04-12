@@ -79,3 +79,10 @@ Each hook checks an env flag before running:
 | `ORBITS_NO_SESSION_RECALL=1` | SessionStart memory injection |
 | `ORBITS_NO_PROMPT_INJECT=1` | per-prompt memory injection |
 | `ORBITS_NO_AUTO_REMEMBER=1` | PostToolUse auto-store |
+
+## Super Important Todos
+
+- [ ] **Add a proper UI**: Build a frontend/GUI for the orchestration and memory system.
+- [ ] **Link with opencode**: Integrate orbits with the opencode framework.
+- [ ] **Hook up to Obsidian**: Seamlessly sync the `Knowledge/notes/` directory and backlinks with an Obsidian vault.
+- [ ] **RAM tracker with limits**: Implement memory profiling and set strict limits on resource/RAM consumption for the orchestration agents and slm.
