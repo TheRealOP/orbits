@@ -86,3 +86,9 @@ Each hook checks an env flag before running:
 - [ ] **Link with opencode**: Integrate orbits with the opencode framework.
 - [ ] **Hook up to Obsidian**: Seamlessly sync the `Knowledge/notes/` directory and backlinks with an Obsidian vault.
 - [ ] **RAM tracker with limits**: Implement memory profiling and set strict limits on resource/RAM consumption for the orchestration agents and slm.
+- [ ] **Authenticate gemini CLI** — `gemini auth` (interactive, must be done by user). Without it, brain modules degrade to slm-only mode.
+- [ ] **End-to-end smoke test** — drop a note in `Knowledge/notes/`, run `/knowledge-sync`, start fresh Claude Code session, verify `<memory>` injection.
+- [ ] **OMC fork personalisation** — `git -C vendor/oh-my-claudecode checkout -b my-orbits`, customize agents/skills.
+- [ ] **slm fork personalisation** — `git -C vendor/superlocalmemory checkout -b my-orbits`.
+- [ ] **(Optional)** Fix lightgbm/libomp warning: `brew install libomp`.
+- [ ] **(Optional v2)** `/forget <query>` command, weekly digest, scheduled linker cron.
