@@ -31,11 +31,12 @@ def main() -> None:
                         help="Number of chunks to retrieve")
     args = parser.parse_args()
 
-    # Kill-switch: ORBITS_NO_SESSION_RECALL for session hooks,
-    #             ORBITS_NO_PROMPT_INJECT for per-prompt hooks
-    if args.session_start and os.environ.get("ORBITS_NO_SESSION_RECALL") == "1":
+    from orchestration.config import should_disable_session_recall, should_disable_prompt_inject
+    
+    # Kill-switches: ORBITS_NO_SESSION_RECALL / orbit.json
+    if args.session_start and should_disable_session_recall():
         sys.exit(0)
-    if not args.session_start and os.environ.get("ORBITS_NO_PROMPT_INJECT") == "1":
+    if not args.session_start and should_disable_prompt_inject():
         sys.exit(0)
 
     query = (

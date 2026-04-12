@@ -12,7 +12,7 @@ if [[ ! -x "$VENV_PYTHON" ]]; then
     exit 0
 fi
 
-[[ "${ORBITS_NO_AUTO_REMEMBER:-}" == "1" ]] && exit 0
+# ORBITS_NO_AUTO_REMEMBER/orbit.json is handled in python now
 
 # Read JSON payload from stdin
 INPUT="$(cat)"

@@ -1,0 +1,21 @@
+{
+  "name": "orbit",
+  "description": "All-in-one memory + orchestration workspace.",
+  "memory": {
+    "engine": "superlocalmemory",
+    "brain": "gemini",
+    "brain_disabled": false,
+    "triggers": {
+      "session_recall": true,
+      "prompt_inject": true,
+      "auto_remember": true
+    }
+  },
+  "opencode": {
+    "linked": false
+  },
+  "tracker": {
+    "ram_limit_mb": 1024,
+    "enabled": false
+  }
+}

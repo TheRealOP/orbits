@@ -76,8 +76,9 @@ def should_remember(
     if _BOILERPLATE.match(text):
         return False, {}
 
-    # 3 — check env kill-switch
-    if os.environ.get("ORBITS_NO_AUTO_REMEMBER") == "1":
+    # 3 — check configs (orbit.json or env vars)
+    from orchestration.config import should_disable_auto_remember
+    if should_disable_auto_remember():
         return False, {}
 
     # 4 — ask Gemini

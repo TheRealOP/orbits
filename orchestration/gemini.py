@@ -57,7 +57,8 @@ def ask(
     Returns the stripped stdout string, or None if every tier fails.
     Uses a spinner on stdout so the caller sees progress.
     """
-    if os.environ.get("GEMINI_DISABLED") == "1":
+    from orchestration.config import is_gemini_disabled
+    if is_gemini_disabled():
         return None
 
     cascade = _cascade or MODEL_CASCADE
