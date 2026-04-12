@@ -1,0 +1,263 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1775928831417,
+  "projectRoot": "/Users/ojaspolakhare/Documents/GitHub/orbits",
+  "techStack": {
+    "languages": [],
+    "frameworks": [],
+    "packageManager": null,
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {},
+  "hotPaths": [
+    {
+      "path": "orchestration/gemini.py",
+      "accessCount": 14,
+      "lastAccessed": 1775956421898,
+      "type": "file"
+    },
+    {
+      "path": "",
+      "accessCount": 5,
+      "lastAccessed": 1775937035619,
+      "type": "directory"
+    },
+    {
+      "path": "orchestration/memory.py",
+      "accessCount": 5,
+      "lastAccessed": 1775954315247,
+      "type": "file"
+    },
+    {
+      "path": "Knowledge/progress/TODO.md",
+      "accessCount": 4,
+      "lastAccessed": 1775951876078,
+      "type": "file"
+    },
+    {
+      "path": "hello_world.py",
+      "accessCount": 3,
+      "lastAccessed": 1775933440335,
+      "type": "file"
+    },
+    {
+      "path": "Knowledge/progress/session_2026-04-11.md",
+      "accessCount": 3,
+      "lastAccessed": 1775951838920,
+      "type": "file"
+    },
+    {
+      "path": "orchestration/brain/policy.py",
+      "accessCount": 3,
+      "lastAccessed": 1775951990172,
+      "type": "file"
+    },
+    {
+      "path": "scripts/knowledge_ingest.py",
+      "accessCount": 3,
+      "lastAccessed": 1775954351820,
+      "type": "file"
+    },
+    {
+      "path": "tests/test_brain.py",
+      "accessCount": 2,
+      "lastAccessed": 1775945324400,
+      "type": "file"
+    },
+    {
+      "path": "Knowledge/progress/ai_trading_research.md",
+      "accessCount": 2,
+      "lastAccessed": 1775951683223,
+      "type": "file"
+    },
+    {
+      "path": "Knowledge/progress/token_usage.md",
+      "accessCount": 2,
+      "lastAccessed": 1775951713947,
+      "type": "file"
+    },
+    {
+      "path": "README.md",
+      "accessCount": 1,
+      "lastAccessed": 1775941098014,
+      "type": "file"
+    },
+    {
+      "path": "orchestration/brain/__init__.py",
+      "accessCount": 1,
+      "lastAccessed": 1775941407660,
+      "type": "file"
+    },
+    {
+      "path": "orchestration/brain/tagger.py",
+      "accessCount": 1,
+      "lastAccessed": 1775941426536,
+      "type": "file"
+    },
+    {
+      "path": "orchestration/brain/curator.py",
+      "accessCount": 1,
+      "lastAccessed": 1775941444564,
+      "type": "file"
+    },
+    {
+      "path": "orchestration/brain/synthesizer.py",
+      "accessCount": 1,
+      "lastAccessed": 1775941468899,
+      "type": "file"
+    },
+    {
+      "path": "orchestration/__init__.py",
+      "accessCount": 1,
+      "lastAccessed": 1775944995054,
+      "type": "file"
+    },
+    {
+      "path": "orchestration/brain/linker.py",
+      "accessCount": 1,
+      "lastAccessed": 1775945020298,
+      "type": "file"
+    },
+    {
+      "path": "orchestration/recall_injector.py",
+      "accessCount": 1,
+      "lastAccessed": 1775945028415,
+      "type": "file"
+    },
+    {
+      "path": ".mcp.json",
+      "accessCount": 1,
+      "lastAccessed": 1775945036180,
+      "type": "file"
+    },
+    {
+      "path": ".claude/hooks/session_start.sh",
+      "accessCount": 1,
+      "lastAccessed": 1775945094983,
+      "type": "file"
+    },
+    {
+      "path": ".claude/hooks/user_prompt_submit.sh",
+      "accessCount": 1,
+      "lastAccessed": 1775945095306,
+      "type": "file"
+    },
+    {
+      "path": ".claude/hooks/post_tool_use.sh",
+      "accessCount": 1,
+      "lastAccessed": 1775945095588,
+      "type": "file"
+    },
+    {
+      "path": ".claude/settings.json",
+      "accessCount": 1,
+      "lastAccessed": 1775945095867,
+      "type": "file"
+    },
+    {
+      "path": ".claude/commands/recall.md",
+      "accessCount": 1,
+      "lastAccessed": 1775945101785,
+      "type": "file"
+    },
+    {
+      "path": ".claude/commands/remember.md",
+      "accessCount": 1,
+      "lastAccessed": 1775945104643,
+      "type": "file"
+    },
+    {
+      "path": ".claude/commands/knowledge-sync.md",
+      "accessCount": 1,
+      "lastAccessed": 1775945108057,
+      "type": "file"
+    },
+    {
+      "path": ".claude/agents/memory-curator.md",
+      "accessCount": 1,
+      "lastAccessed": 1775945115236,
+      "type": "file"
+    },
+    {
+      "path": "scripts/bootstrap.sh",
+      "accessCount": 1,
+      "lastAccessed": 1775945133489,
+      "type": "file"
+    },
+    {
+      "path": "scripts/link_omc.sh",
+      "accessCount": 1,
+      "lastAccessed": 1775945149312,
+      "type": "file"
+    },
+    {
+      "path": "scripts/doctor.sh",
+      "accessCount": 1,
+      "lastAccessed": 1775945190986,
+      "type": "file"
+    },
+    {
+      "path": "tests/__init__.py",
+      "accessCount": 1,
+      "lastAccessed": 1775945194335,
+      "type": "file"
+    },
+    {
+      "path": "tests/test_memory.py",
+      "accessCount": 1,
+      "lastAccessed": 1775945210267,
+      "type": "file"
+    },
+    {
+      "path": "tests/test_gemini.py",
+      "accessCount": 1,
+      "lastAccessed": 1775945220126,
+      "type": "file"
+    },
+    {
+      "path": "Knowledge/progress/implementation_plan.md",
+      "accessCount": 1,
+      "lastAccessed": 1775950382423,
+      "type": "file"
+    },
+    {
+      "path": "pyproject.toml",
+      "accessCount": 1,
+      "lastAccessed": 1775950449641,
+      "type": "file"
+    },
+    {
+      "path": "requirements-dev.txt",
+      "accessCount": 1,
+      "lastAccessed": 1775950450707,
+      "type": "file"
+    },
+    {
+      "path": "AGENTS.md",
+      "accessCount": 1,
+      "lastAccessed": 1775952192803,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

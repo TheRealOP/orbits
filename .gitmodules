@@ -1,0 +1,6 @@
+[submodule "vendor/oh-my-claudecode"]
+	path = vendor/oh-my-claudecode
+	url = https://github.com/Yeachan-Heo/oh-my-claudecode.git
+[submodule "vendor/superlocalmemory"]
+	path = vendor/superlocalmemory
+	url = https://github.com/qualixar/superlocalmemory

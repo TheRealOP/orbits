@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "superlocalmemory": {
+      "command": "slm",
+      "args": ["mcp"],
+      "description": "SuperLocalMemory MCP server — local semantic memory (slm mcp). Run 'bash scripts/bootstrap.sh' first to ensure slm is on PATH."
+    }
+  }
+}
