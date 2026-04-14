@@ -50,6 +50,7 @@ class TestInterfaceRouter(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["mode"], "dual")
         self.assertEqual(bus.sent[0]["payload"]["mode"], "dual")
         self.assertIn("task_id", bus.sent[0]["payload"])
+        self.assertIn("both available", result["message"])
 
     async def test_routes_gpt_only_when_claude_rate_limited(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -59,6 +60,7 @@ class TestInterfaceRouter(unittest.IsolatedAsyncioTestCase):
             bus = _FakeBus()
             result = await router.route_task("test", config=config, bus=bus)
         self.assertEqual(result["mode"], "gpt_only")
+        self.assertIn("GPT fallback path", result["message"])
 
     async def test_routes_claude_only_when_gpt_unavailable(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -68,6 +70,7 @@ class TestInterfaceRouter(unittest.IsolatedAsyncioTestCase):
             bus = _FakeBus()
             result = await router.route_task("test", config=config, bus=bus)
         self.assertEqual(result["mode"], "claude_only")
+        self.assertIn("Claude-only path", result["message"])
 
     async def test_queues_when_both_unavailable(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -79,6 +82,7 @@ class TestInterfaceRouter(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(queue_path.exists())
         self.assertEqual(result["mode"], "queued")
         self.assertIn("task_id", result)
+        self.assertIn("queued the task", result["message"])
 
     async def test_queues_when_status_file_missing(self):
         with tempfile.TemporaryDirectory() as temp_dir:

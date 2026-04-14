@@ -63,6 +63,18 @@ def decide_route(status: dict) -> RouteDecision:
     return RouteDecision("queued", "No safe primary execution path is available.")
 
 
+def build_user_message(status: dict, decision: RouteDecision) -> str:
+    claude = status.get("claude_sonnet", "unknown")
+    gpt = status.get("gpt_5_4", "unknown")
+    if decision.mode == "dual":
+        return "Routing normally: Claude and GPT are both available."
+    if decision.mode == "gpt_only":
+        return f"Claude is {claude}, so I’m routing this through the GPT fallback path."
+    if decision.mode == "claude_only":
+        return f"GPT is {gpt}, so I’m routing this through the Claude-only path."
+    return f"Claude is {claude} and GPT is {gpt}, so I queued the task until a primary path recovers."
+
+
 def append_queue_entry(task: str, mode: str, task_id: str, config: dict | None = None) -> Path:
     config = config or load_config()
     queue_path = _resolve_runtime_path(config["daemon"]["state_dir"]) / "task_queue.jsonl"
@@ -84,7 +96,7 @@ async def route_task(task: str, *, task_id: str | None = None, config: dict | No
         return {
             "task_id": task_id,
             "mode": decision.mode,
-            "message": f"Task queued: {decision.reason}",
+            "message": build_user_message(status, decision),
             "queue_path": str(queue_path),
         }
 
@@ -108,7 +120,7 @@ async def route_task(task: str, *, task_id: str | None = None, config: dict | No
     return {
         "task_id": task_id,
         "mode": decision.mode,
-        "message": f"Task routed in {decision.mode} mode: {decision.reason}",
+        "message": build_user_message(status, decision),
     }
 
 
