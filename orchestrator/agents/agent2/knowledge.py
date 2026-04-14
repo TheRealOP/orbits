@@ -190,6 +190,9 @@ class Agent2:
         elif msg.msg_type == MsgType.TASK_COMPLETE:
             await self._handle_task_complete(msg)
 
+        elif msg.msg_type == MsgType.MODEL_RECOMMENDATION:
+            await self._handle_model_recommendation(msg)
+
         elif msg.msg_type == MsgType.TASK_FAILED:
             _log.warning("TASK_FAILED from=%s payload=%s", msg.from_agent, msg.payload)
             self._oracle.update_from_experience(
@@ -214,11 +217,37 @@ class Agent2:
 
         await self._bus.send(
             self.AGENT_ID, msg.from_agent, MsgType.CONTEXT_DELIVERY,
-            {"topic": topic, "context": context, "request_id": msg.id},
+            {
+                "topic": topic,
+                "context": context,
+                "request_id": msg.id,
+                "context_packet": {
+                    "topic": topic,
+                    "constraints": msg.payload.get("constraints", {}),
+                    "relevant_files": msg.payload.get("relevant_files", []),
+                },
+            },
             priority=2,
         )
         _log.debug("CONTEXT_DELIVERY → %s topic=%s chars=%d",
                    msg.from_agent, topic, len(context))
+
+    async def _handle_model_recommendation(self, msg) -> None:
+        task_type = msg.payload.get("task_type", "planning")
+        constraints = msg.payload.get("constraints", {})
+        packet = self._oracle.build_context_packet(task_type, constraints)
+        await self._bus.send(
+            self.AGENT_ID,
+            msg.from_agent,
+            MsgType.MODEL_RECOMMENDATION,
+            {
+                "request_id": msg.id,
+                "task_type": task_type,
+                "model": packet["recommended_model"],
+                "context_packet": packet,
+            },
+            priority=3,
+        )
 
     async def _handle_task_complete(self, msg) -> None:
         task_id = msg.payload.get("task_id", "unknown")

@@ -33,6 +33,7 @@ class PlanStep:
     description: str
     task_type: str           # "coding" | "research" | "review" | "formatting" | etc.
     recommended_model: str
+    eligible_models: list[str]
     depends_on: list[str]
     estimated_tokens: int
 
@@ -140,6 +141,7 @@ class PlannerSubagent:
                 description=s.get("description", ""),
                 task_type=s.get("task_type", "coding"),
                 recommended_model=s.get("recommended_model", "claude-haiku-4-5"),
+                eligible_models=s.get("eligible_models", []),
                 depends_on=s.get("depends_on", []),
                 estimated_tokens=s.get("estimated_tokens", 500),
             )

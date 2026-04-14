@@ -76,6 +76,33 @@ class TestAgent1Modes(unittest.IsolatedAsyncioTestCase):
         write_session_owner.assert_called_once()
         self.assertEqual(set_pending_handoff.call_args_list[0].args, (True, config))
 
+    async def test_dual_mode_uses_context_packet_eligible_models(self):
+        agent = Agent1(_DummyBus(), _DummyRegistry())
+        plan = SimpleNamespace(
+            steps=[SimpleNamespace(step_id="step_1", description="do work", task_type="coding", recommended_model="claude-haiku-4-5", eligible_models=[])],
+            parallelizable=False,
+            raw={"steps": [{"step_id": "step_1"}]},
+        )
+        agent._request_context = AsyncMock(return_value="ctx")
+        agent._planner.plan = AsyncMock(return_value=plan)
+        agent._request_model_packet = AsyncMock(
+            return_value={
+                "model": "gpt-5.4",
+                "context_packet": {"eligible_models": [{"id": "gpt-5.4"}, {"id": "gemini-2.5-flash"}]},
+            }
+        )
+        agent._prompter.generate_prompts = AsyncMock(return_value={"step_1": "prompt"})
+        agent._worker_mgr.spawn_worker = AsyncMock(return_value="worker-1")
+        agent._worker_mgr.wait_for_completion = AsyncMock(return_value={"worker-1": {"status": "complete", "step_id": "step_1", "output": "done"}})
+        agent._retry_failures = AsyncMock(return_value={"worker-1": {"status": "complete", "step_id": "step_1", "output": "done"}})
+        with patch("orchestrator.agents.agent1.executor.write_task_record"), patch(
+            "orchestrator.agents.agent1.executor.write_session_owner"
+        ), patch("orchestrator.agents.agent1.executor.set_pending_handoff"):
+            await agent._handle_task("test task", route_mode="dual")
+
+        self.assertEqual(plan.steps[0].recommended_model, "gpt-5.4")
+        self.assertEqual(plan.steps[0].eligible_models, ["gpt-5.4", "gemini-2.5-flash"])
+
     def test_resume_plan_from_handoff_skips_completed_steps(self):
         planner = SimpleNamespace(
             _parse_plan=lambda raw: SimpleNamespace(

@@ -153,6 +153,7 @@ class Agent1:
                         "description": step.description,
                         "task_type": step.task_type,
                         "recommended_model": step.recommended_model,
+                        "eligible_models": getattr(step, "eligible_models", []),
                         "depends_on": getattr(step, "depends_on", []),
                         "estimated_tokens": getattr(step, "estimated_tokens", 500),
                     }
@@ -167,9 +168,12 @@ class Agent1:
             # 3. Get model recommendations from Agent 2
             if route_mode == "dual":
                 for step in plan.steps:
-                    rec = await self._request_model_recommendation(step.task_type)
-                    if rec:
-                        step.recommended_model = rec
+                    packet = await self._request_model_packet(step.task_type)
+                    if packet and packet.get("model"):
+                        step.recommended_model = packet["model"]
+                    if packet:
+                        context_packet = packet.get("context_packet", {})
+                        step.eligible_models = [model["id"] for model in context_packet.get("eligible_models", [])]
 
             # 4. Generate prompts
             prompts = await self._prompter.generate_prompts(plan)
@@ -269,7 +273,7 @@ class Agent1:
             await asyncio.sleep(0.5)
         return ""
 
-    async def _request_model_recommendation(self, task_type: str) -> str | None:
+    async def _request_model_packet(self, task_type: str) -> dict | None:
         msg_id = await self._bus.send(
             self.AGENT_ID, "agent2", MsgType.MODEL_RECOMMENDATION,
             {"task_type": task_type}, priority=4,
@@ -281,7 +285,7 @@ class Agent1:
             for m in msgs:
                 if m.payload.get("request_id") == msg_id:
                     await self._bus.mark_read(m.id)
-                    return m.payload.get("model")
+                    return m.payload
             await asyncio.sleep(0.5)
         return None
 

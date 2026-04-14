@@ -88,3 +88,11 @@
 - Verification:
   - `.venv/bin/python -m pytest tests/test_model_oracle.py -v` -> 4 passed
   - full targeted regression -> 35 passed
+- Extended Agent 2 to respond to `MODEL_RECOMMENDATION` with a structured context packet.
+- Added `tests/test_agent2_knowledge.py`.
+- Verification:
+  - `.venv/bin/python -m pytest tests/test_agent2_knowledge.py tests/test_model_oracle.py -v` -> 5 passed
+  - full targeted regression -> 37 passed
+- Integrated the context packet into Agent 1's per-step model selection.
+- Agent 1 now records `eligible_models` on steps when Agent 2 provides them.
+- Added executor coverage proving dual-mode uses the context packet recommendation and eligible model list.
