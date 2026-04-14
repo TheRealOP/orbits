@@ -20,6 +20,9 @@ if [[ -z "$INPUT" ]]; then
     exit 0
 fi
 
+export REPO_ROOT
+export HOOK_INPUT="$INPUT"
+
 "$VENV_PYTHON" - <<'PYEOF' 2>>"$LOG" || true
 import json, os, sys, datetime
 sys.path.insert(0, os.environ.get("REPO_ROOT", "."))
@@ -39,7 +42,7 @@ memory.remember(tool_output, metadata=metadata)
 
 # Audit log
 audit = {
-    "ts":        datetime.datetime.utcnow().isoformat(),
+    "ts":        datetime.datetime.now(datetime.UTC).isoformat(),
     "tool":      tool_name,
     "topic":     metadata.get("topic", ""),
     "slug":      metadata.get("slug", ""),
@@ -54,7 +57,3 @@ log_path = os.path.join(
 with open(log_path, "a") as f:
     f.write(json.dumps(audit) + "\n")
 PYEOF
-
-# Pass the input via env so the heredoc Python can read it
-export REPO_ROOT
-export HOOK_INPUT="$INPUT"

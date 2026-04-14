@@ -20,6 +20,11 @@ build/
 .omc/state/
 .omc/sessions/
 
+# ── Orchestrator runtime ─────────────────────────────────────────────────────
+orchestrator/bus.db
+orchestrator/logs/
+orbits/state/
+
 # ── macOS ────────────────────────────────────────────────────────────────────
 .DS_Store
 .AppleDouble

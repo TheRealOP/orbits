@@ -1,0 +1,90 @@
+2026-04-14
+- Finalized session contract and collected signatures from Agent 1, Agent 2, and Claude Code.
+- Created Ralph planning artifacts:
+  - .omc/plans/prd-ram-manager-2026-04-14.md
+  - .omc/plans/test-spec-ram-manager-2026-04-14.md
+  - .omc/prd.json
+- Implemented RAM manager core in orchestration/ram_manager.py.
+- Added callable CLI in scripts/ram_manager.py with status, gate, enforce, and watch commands.
+- Repointed scripts/ram_watchdog.sh to the new RAM manager for compatibility.
+- Added focused verification tests in tests/test_ram_manager.py.
+- Verification evidence so far:
+  - .venv/bin/python -m pytest tests/test_ram_manager.py -v -> 6 passed
+  - python3 scripts/ram_manager.py status -> succeeded and wrote .omc/state/ram_manager_status.json
+  - python3 scripts/ram_manager.py gate -> succeeded
+  - python3 scripts/ram_manager.py watch --interval 0.2 --iterations 3 -> succeeded
+  - bash scripts/ram_watchdog.sh -> succeeded as compatibility wrapper
+- Observed live RAM snapshot near the soft threshold (~8.0 GB), so warning-state gating is relevant during ongoing work.
+- Fixed Gemini smoke-test/config drift by updating `scripts/doctor.sh` and `.claude/settings.local.json` to use valid gemini-cli invocation and model names.
+- Fixed `.claude/hooks/post_tool_use.sh` environment export ordering so hook payloads are actually available to the Python body.
+- Fixed `scripts/knowledge_ingest.py` relative-path handling so repo-relative note paths ingest correctly.
+- Removed UTC deprecation warnings in knowledge-ingest and post-tool hook audit timestamps.
+- Verified post-RAM smoke path:
+  - `bash scripts/doctor.sh` -> 13 pass, 1 warn, 0 fail
+  - `gemini --yolo "Reply with the single word: pong" --model gemini-2.5-flash` -> pong
+  - `python scripts/knowledge_ingest.py Knowledge/notes/smoke-test-2026-04-14.md` -> ingested successfully
+  - `python -m orchestration.recall_injector --query "ORBITS-SMOKE-RAZOR-OWL-2026" --k 5` -> returned `<memory>` block containing the smoke phrase
+  - `bash .claude/hooks/session_start.sh` -> returned `<memory>` block including smoke-test context
+  - `printf 'ORBITS-SMOKE-RAZOR-OWL-2026' | bash .claude/hooks/user_prompt_submit.sh` -> returned `<memory>` block containing the smoke phrase
+  - `bash .claude/hooks/post_tool_use.sh` with substantive payload -> audit entry written to `Knowledge/ingested/2026-04-14.jsonl`
+- Planned and implemented the next foundational feature: model-status monitor daemon.
+- Added `orbits/config.json` and `orbits/daemon/monitor.py` for shared model-status polling/state.
+- Added `tests/test_daemon_monitor.py` and verified:
+  - `.venv/bin/python -m pytest tests/test_daemon_monitor.py -v` -> 6 passed
+  - `.venv/bin/python -m orbits.daemon.monitor --once` -> wrote `orbits/state/model_status.json`
+  - `python3 -c "...detect_claude(...)"` with mock log -> `rate_limited`
+  - `orbits/state/model_status_events.jsonl` created with status change entry
+- Implemented interface router that consumes `orbits/state/model_status.json` and routes tasks conservatively.
+- Added `orbits/agents/interface/router.py`, `orbits/agents/interface/AGENT.md`, and `tests/test_interface_router.py`.
+- Verified interface routing:
+  - `.venv/bin/python -m pytest tests/test_interface_router.py -v` -> 7 passed
+  - `.venv/bin/python -m orbits.agents.interface.router "sample task"` -> routed in `dual` mode with active status file
+  - isolated-bus smoke -> `TASK_ASSIGN` delivered with `mode=gpt_only`
+  - queued-path behavior verified by tests and queue file append coverage
+- Implemented deterministic handoff-store helpers for the double-headed orchestrator foundation.
+- Added `orbits/handoff/store.py` and `tests/test_handoff_store.py`.
+- Verified handoff helpers:
+  - `.venv/bin/python -m pytest tests/test_handoff_store.py -v` -> 6 passed
+  - smoke script confirmed handoff record write/read, session-owner write/read, and `pending_handoff` toggle in `model_status.json`
+- Integrated routed-task handling into `orchestrator/agents/agent1/executor.py`.
+- Added mode override + handoff-write verification in `tests/test_agent1_executor_modes.py`.
+- Verified integration layer:
+  - `.venv/bin/python -m pytest tests/test_agent1_executor_modes.py -v` -> 2 passed
+  - combined regression -> 22 passed across daemon/router/handoff/executor tests
+  - bus-routed smoke script consumed `TASK_ASSIGN`, forced `gpt_only`, and wrote session owner state
+- Implemented `Knowledge/` backup system:
+  - `orbits/backup/knowledge.py`
+  - `scripts/knowledge_backup.py`
+  - `tests/test_knowledge_backup.py`
+- Backup verification:
+  - `.venv/bin/python -m pytest tests/test_knowledge_backup.py -v` -> 4 passed
+  - `python3 scripts/knowledge_backup.py` -> archive + manifest created under `orbits/state/backups/`
+  - targeted regression -> 26 passed
+- Added orchestrator head instruction files:
+  - `orbits/agents/orchestrator/claude_head/AGENT.md`
+  - `orbits/agents/orchestrator/gpt_head/AGENT.md`
+- These now document role boundaries, required state, outputs, rules, and halt conditions for the double-headed handoff model.
+- Follow-up doc pass added explicit JSON schemas, `next_step` naming, and GPT usage-tracking expectations to both head files.
+- Expanded OpenCode telemetry in `orbits/daemon/monitor.py`:
+  - configurable `opencode_event_dir`
+  - JSONL usage parsing (`input_tokens`, `cached_input_tokens`, `output_tokens`)
+  - plaintext fallback with estimated token counts
+  - explicit error detection from event streams
+- Added daemon monitor tests for JSONL parsing, plaintext fallback, empty-stream fallback, and error detection.
+- Verification:
+  - `.venv/bin/python -m pytest tests/test_daemon_monitor.py -v` -> 11 passed
+  - full targeted regression -> 31 passed
+- Extended the interface router to carry stable `task_id` values through routed work.
+- Implemented true GPT-head resume behavior in `orchestrator/agents/agent1/executor.py`:
+  - loads stored `plan.json` + `handoff.json` for `gpt_only`
+  - skips completed steps
+  - resumes from explicit `next_step`
+  - writes a completion handoff back for Claude review
+- Added executor resume coverage in `tests/test_agent1_executor_modes.py`.
+- End-to-end smoke: routed a `gpt_only` task with a prewritten handoff, resumed only `step_2`, and wrote updated handoff state.
+- Built Agent 2's structured model registry in `orchestrator/agents/agent2/model_oracle.py`.
+- Expanded `orchestrator/knowledge/model_index.json` with VISION-style registry fields and added a `gpt-5.4` entry.
+- Added `tests/test_model_oracle.py`.
+- Verification:
+  - `.venv/bin/python -m pytest tests/test_model_oracle.py -v` -> 4 passed
+  - full targeted regression -> 35 passed

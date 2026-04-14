@@ -56,6 +56,7 @@ def audit(entry: dict) -> None:
 
 def ingest_file(filepath: Path, manifest: dict, force: bool = False) -> str:
     """Return 'ok', 'skip', or 'fail'."""
+    filepath = filepath if filepath.is_absolute() else (REPO_ROOT / filepath)
     raw = filepath.read_text(encoding="utf-8", errors="replace")
     file_sha = sha256(raw)
     key = str(filepath.relative_to(REPO_ROOT))
@@ -73,7 +74,7 @@ def ingest_file(filepath: Path, manifest: dict, force: bool = False) -> str:
     if ok:
         manifest[key] = file_sha
         audit({
-            "ts":     datetime.datetime.utcnow().isoformat(),
+            "ts":     datetime.datetime.now(datetime.UTC).isoformat(),
             "file":   key,
             "sha":    file_sha,
             "topic":  metadata.get("topic", ""),

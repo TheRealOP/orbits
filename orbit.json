@@ -15,7 +15,9 @@
     "linked": false
   },
   "tracker": {
-    "ram_limit_mb": 1024,
-    "enabled": false
+    "ram_limit_mb": 5120,
+    "ram_soft_mb": 8192,
+    "ram_hard_mb": 10240,
+    "enabled": true
   }
 }

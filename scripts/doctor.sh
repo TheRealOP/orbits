@@ -80,12 +80,12 @@ fi
 header "4. Gemini CLI"
 if command -v gemini &>/dev/null; then
     pass "gemini found: $(command -v gemini)"
-    # smoke test with cheapest model
-    if gemini -p "Reply with the single word: pong" --model gemini-2.0-flash-lite \
+    # smoke test with a valid lightweight model for gemini-cli v0.24.0
+    if gemini --yolo "Reply with the single word: pong" --model gemini-2.5-flash \
         &>/dev/null 2>&1; then
-        pass "gemini smoke test passed (flash-lite)"
+        pass "gemini smoke test passed (2.5-flash)"
     else
-        warn "gemini smoke test failed — check auth / API key"
+        warn "gemini smoke test failed — check auth, CLI config, or model availability"
     fi
 else
     warn "'gemini' CLI not found — brain modules will degrade to slm-only"

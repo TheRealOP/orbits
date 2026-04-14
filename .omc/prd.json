@@ -1,0 +1,46 @@
+{
+  "task": "Build and verify the interface router that consumes model_status.json",
+  "stories": [
+    {
+      "id": "US-001",
+      "title": "Safe status-file reader",
+      "passes": true,
+      "acceptanceCriteria": [
+        "The router reads model_status.json from config or default state path.",
+        "If the file is absent or invalid JSON, routing falls back to queued.",
+        "The status reader returns a normalized structure usable by routing logic."
+      ]
+    },
+    {
+      "id": "US-002",
+      "title": "Routing decisions",
+      "passes": true,
+      "acceptanceCriteria": [
+        "Status claude active plus gpt active routes as dual.",
+        "Status claude rate_limited plus gpt active routes as gpt_only.",
+        "Status claude active plus gpt error or unknown routes as claude_only.",
+        "All other cases route as queued."
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "Dispatch and queue persistence",
+      "passes": true,
+      "acceptanceCriteria": [
+        "Routed tasks emit a TASK_ASSIGN bus message with mode in payload metadata.",
+        "Queued tasks append to orbits/state/task_queue.jsonl.",
+        "Router returns a user-facing status string describing what happened."
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "Verification coverage",
+      "passes": true,
+      "acceptanceCriteria": [
+        "Unit tests cover the four routing branches.",
+        "Unit tests cover missing or invalid status-file fallback.",
+        "Unit tests cover queue-file append behavior."
+      ]
+    }
+  ]
+}
