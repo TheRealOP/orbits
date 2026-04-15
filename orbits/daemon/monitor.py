@@ -8,6 +8,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import time
@@ -28,6 +29,7 @@ DEFAULT_CONFIG = {
         "events_log": "orbits/state/model_status_events.jsonl",
         "claude_log_dir": "~/.claude/logs",
         "opencode_event_dir": "orbits/state/opencode",
+        "pid_file": "orbits/state/model_status_daemon.pid",
     },
     "models": {
         "primary_orchestrator": "claude-sonnet-4-6",
@@ -80,7 +82,7 @@ def load_config(config_path: Path | None = None) -> dict:
     if config_path.exists():
         config = _deep_merge(DEFAULT_CONFIG, json.loads(config_path.read_text(encoding="utf-8")))
     daemon_cfg = config["daemon"]
-    for key in ("state_dir", "status_file", "events_log", "claude_log_dir", "opencode_event_dir"):
+    for key in ("state_dir", "status_file", "events_log", "claude_log_dir", "opencode_event_dir", "pid_file"):
         daemon_cfg[key] = str(daemon_cfg[key])
     return config
 
@@ -345,9 +347,90 @@ class MonitorDaemon:
                 time.sleep(interval)
 
 
+def _pid_file(config: dict) -> Path:
+    return _resolve_path(config["daemon"]["pid_file"])
+
+
+def _read_pid(config: dict) -> int | None:
+    path = _pid_file(config)
+    if not path.exists():
+        return None
+    try:
+        return int(path.read_text(encoding="utf-8").strip())
+    except (ValueError, OSError):
+        return None
+
+
+def _pid_is_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _write_pid(config: dict, pid: int) -> Path:
+    path = _pid_file(config)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"{pid}\n", encoding="utf-8")
+    return path
+
+
+def _clear_pid(config: dict) -> None:
+    path = _pid_file(config)
+    if path.exists():
+        path.unlink()
+
+
+def daemon_status(config: dict) -> dict:
+    pid = _read_pid(config)
+    alive = bool(pid and _pid_is_alive(pid))
+    if pid and not alive:
+        _clear_pid(config)
+        pid = None
+    return {"running": alive, "pid": pid}
+
+
+def start_daemon(config: dict) -> dict:
+    status = daemon_status(config)
+    if status["running"]:
+        return {"started": False, "reason": "already_running", "pid": status["pid"]}
+
+    env = os.environ.copy()
+    process = subprocess.Popen(
+        [sys.executable, "-m", "orbits.daemon.monitor"],
+        cwd=str(REPO_ROOT),
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    _write_pid(config, process.pid)
+    return {"started": True, "pid": process.pid}
+
+
+def stop_daemon(config: dict) -> dict:
+    pid = _read_pid(config)
+    if not pid:
+        return {"stopped": False, "reason": "not_running"}
+    if not _pid_is_alive(pid):
+        _clear_pid(config)
+        return {"stopped": False, "reason": "stale_pid"}
+    os.kill(pid, signal.SIGTERM)
+    for _ in range(20):
+        if not _pid_is_alive(pid):
+            _clear_pid(config)
+            return {"stopped": True, "pid": pid}
+        time.sleep(0.1)
+    return {"stopped": False, "reason": "timeout", "pid": pid}
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Orbits model-status monitor daemon")
     parser.add_argument("--once", action="store_true", help="Run one cycle and exit")
+    parser.add_argument("--start", action="store_true", help="Start monitor as a background daemon")
+    parser.add_argument("--stop", action="store_true", help="Stop the background daemon")
+    parser.add_argument("--status", action="store_true", help="Show daemon running status")
     parser.add_argument("--iterations", type=int, default=None, help="Run a fixed number of cycles")
     parser.add_argument("--config", type=Path, default=None, help="Override config path")
     return parser
@@ -355,7 +438,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
-    daemon = MonitorDaemon(load_config(args.config) if args.config else load_config())
+    config = load_config(args.config) if args.config else load_config()
+    if args.start:
+        print(json.dumps(start_daemon(config), indent=2))
+        return 0
+    if args.stop:
+        print(json.dumps(stop_daemon(config), indent=2))
+        return 0
+    if args.status:
+        print(json.dumps(daemon_status(config), indent=2))
+        return 0
+    daemon = MonitorDaemon(config)
     if args.once:
         print(json.dumps(asdict(daemon.run_once()), indent=2))
         return 0

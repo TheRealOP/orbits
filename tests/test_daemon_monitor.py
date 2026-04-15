@@ -128,6 +128,66 @@ class TestMonitorDaemon(unittest.TestCase):
         self.assertTrue(status.pending_handoff)
         self.assertIn("Pending handoff is active.", status.notes)
 
+    def test_daemon_status_clears_stale_pid(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = {
+                "daemon": {
+                    "status_file": str(Path(temp_dir) / "state" / "model_status.json"),
+                    "events_log": str(Path(temp_dir) / "state" / "model_status_events.jsonl"),
+                    "state_dir": str(Path(temp_dir) / "state"),
+                    "claude_log_dir": str(Path(temp_dir) / "logs"),
+                    "opencode_event_dir": str(Path(temp_dir) / "opencode"),
+                    "pid_file": str(Path(temp_dir) / "state" / "monitor.pid"),
+                    "poll_interval_seconds": 1,
+                },
+                "models": monitor.DEFAULT_CONFIG["models"],
+            }
+            pid_path = Path(config["daemon"]["pid_file"])
+            pid_path.parent.mkdir(parents=True, exist_ok=True)
+            pid_path.write_text("999999\n", encoding="utf-8")
+            status = monitor.daemon_status(config)
+        self.assertFalse(status["running"])
+        self.assertFalse(pid_path.exists())
+
+    def test_start_daemon_writes_pid(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = {
+                "daemon": {
+                    "status_file": str(Path(temp_dir) / "state" / "model_status.json"),
+                    "events_log": str(Path(temp_dir) / "state" / "model_status_events.jsonl"),
+                    "state_dir": str(Path(temp_dir) / "state"),
+                    "claude_log_dir": str(Path(temp_dir) / "logs"),
+                    "opencode_event_dir": str(Path(temp_dir) / "opencode"),
+                    "pid_file": str(Path(temp_dir) / "state" / "monitor.pid"),
+                    "poll_interval_seconds": 1,
+                },
+                "models": monitor.DEFAULT_CONFIG["models"],
+            }
+            fake_proc = type("Proc", (), {"pid": 12345})()
+            with patch("orbits.daemon.monitor.subprocess.Popen", return_value=fake_proc):
+                result = monitor.start_daemon(config)
+                pid_path = Path(config["daemon"]["pid_file"])
+                self.assertTrue(pid_path.exists())
+        self.assertTrue(result["started"])
+
+    def test_stop_daemon_handles_not_running(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = {
+                "daemon": {
+                    "status_file": str(Path(temp_dir) / "state" / "model_status.json"),
+                    "events_log": str(Path(temp_dir) / "state" / "model_status_events.jsonl"),
+                    "state_dir": str(Path(temp_dir) / "state"),
+                    "claude_log_dir": str(Path(temp_dir) / "logs"),
+                    "opencode_event_dir": str(Path(temp_dir) / "opencode"),
+                    "pid_file": str(Path(temp_dir) / "state" / "monitor.pid"),
+                    "poll_interval_seconds": 1,
+                },
+                "models": monitor.DEFAULT_CONFIG["models"],
+            }
+            result = monitor.stop_daemon(config)
+        self.assertFalse(result["stopped"])
+        self.assertEqual(result["reason"], "not_running")
+
     def test_detect_opencode_active_when_process_present(self):
         fake_proc = type("Proc", (), {"info": {"name": "opencode", "cmdline": ["opencode"]}})()
         with patch("orbits.daemon.monitor.psutil.process_iter", return_value=[fake_proc]):
