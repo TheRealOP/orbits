@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from orchestrator.agents.agent1.executor import Agent1, apply_route_mode, resume_plan_from_handoff
+from orchestrator.agents.agent1.executor import Agent1, apply_route_mode, build_task_constraints, resume_plan_from_handoff
 from orbits.handoff.store import write_task_record
 
 
@@ -37,6 +37,20 @@ class TestAgent1Modes(unittest.IsolatedAsyncioTestCase):
 
         apply_route_mode(plan, "claude_only", config)
         self.assertEqual(plan.steps[0].recommended_model, "claude-sonnet-4-6")
+
+    def test_build_task_constraints_prefers_provider_and_sensitivity(self):
+        config = {
+            "orchestration": {
+                "sensitive_task_types": ["review"],
+                "provider_preferences": {"research": "google", "review": "anthropic"},
+            }
+        }
+        research = build_task_constraints("research", "dual", config)
+        review = build_task_constraints("review", "dual", config)
+        gpt_only = build_task_constraints("coding", "gpt_only", config)
+        self.assertEqual(research["provider_preference"], "google")
+        self.assertTrue(review["allowed_for_sensitive"])
+        self.assertEqual(gpt_only["provider_preference"], "openai")
 
     async def test_handle_task_writes_handoff_state_for_gpt_only(self):
         agent = Agent1(_DummyBus(), _DummyRegistry())
@@ -102,6 +116,28 @@ class TestAgent1Modes(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(plan.steps[0].recommended_model, "gpt-5.4")
         self.assertEqual(plan.steps[0].eligible_models, ["gpt-5.4", "gemini-2.5-flash"])
+
+    async def test_parallel_spawn_is_chunked_by_config_limit(self):
+        agent = Agent1(_DummyBus(), _DummyRegistry())
+        agent._config = {"orchestration": {"max_parallel_workers": 2}}
+        plan = SimpleNamespace(
+            steps=[
+                SimpleNamespace(step_id="s1", recommended_model="gpt-5.4", task_type="coding"),
+                SimpleNamespace(step_id="s2", recommended_model="gpt-5.4", task_type="coding"),
+                SimpleNamespace(step_id="s3", recommended_model="gpt-5.4", task_type="coding"),
+            ]
+        )
+        prompts = {"s1": "p1", "s2": "p2", "s3": "p3"}
+        calls = []
+
+        async def fake_spawn(step_id, model, prompt, context, task_type):
+            calls.append(step_id)
+            return f"worker-{step_id}"
+
+        agent._worker_mgr.spawn_worker = fake_spawn
+        worker_ids = await agent._spawn_parallel_workers(plan, prompts, "ctx")
+        self.assertEqual(worker_ids, ["worker-s1", "worker-s2", "worker-s3"])
+        self.assertEqual(calls, ["s1", "s2", "s3"])
 
     def test_resume_plan_from_handoff_skips_completed_steps(self):
         planner = SimpleNamespace(

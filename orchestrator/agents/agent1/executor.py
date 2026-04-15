@@ -59,6 +59,30 @@ def apply_route_mode(plan, route_mode: str, config: dict | None = None):
     return plan
 
 
+def build_task_constraints(task_type: str, route_mode: str, config: dict | None = None) -> dict:
+    config = config or load_config()
+    orchestration = config.get("orchestration", {})
+    provider_preferences = orchestration.get("provider_preferences", {})
+    sensitive_types = set(orchestration.get("sensitive_task_types", []))
+
+    constraints: dict = {}
+    preferred_provider = provider_preferences.get(task_type)
+    if preferred_provider:
+        constraints["provider_preference"] = preferred_provider
+
+    if task_type in sensitive_types:
+        constraints["allowed_for_sensitive"] = True
+
+    if route_mode == "gpt_only":
+        constraints["provider_preference"] = "openai"
+        constraints["allowed_for_sensitive"] = False
+    elif route_mode == "claude_only":
+        constraints["provider_preference"] = "anthropic"
+        constraints["allowed_for_sensitive"] = True
+
+    return constraints
+
+
 def resume_plan_from_handoff(planner, task_id: str, config: dict | None = None):
     config = config or load_config()
     plan_record = read_task_record(task_id, "plan", config)
@@ -168,7 +192,10 @@ class Agent1:
             # 3. Get model recommendations from Agent 2
             if route_mode == "dual":
                 for step in plan.steps:
-                    packet = await self._request_model_packet(step.task_type)
+                    packet = await self._request_model_packet(
+                        step.task_type,
+                        build_task_constraints(step.task_type, route_mode, self._config),
+                    )
                     if packet and packet.get("model"):
                         step.recommended_model = packet["model"]
                     if packet:
@@ -188,13 +215,7 @@ class Agent1:
 
             # 5. Spawn workers
             if plan.parallelizable:
-                worker_ids = await asyncio.gather(*[
-                    self._worker_mgr.spawn_worker(
-                        step.step_id, step.recommended_model,
-                        prompts[step.step_id], context, step.task_type,
-                    )
-                    for step in plan.steps
-                ])
+                worker_ids = await self._spawn_parallel_workers(plan, prompts, context)
             else:
                 worker_ids = []
                 for step in plan.steps:
@@ -273,10 +294,10 @@ class Agent1:
             await asyncio.sleep(0.5)
         return ""
 
-    async def _request_model_packet(self, task_type: str) -> dict | None:
+    async def _request_model_packet(self, task_type: str, constraints: dict | None = None) -> dict | None:
         msg_id = await self._bus.send(
             self.AGENT_ID, "agent2", MsgType.MODEL_RECOMMENDATION,
-            {"task_type": task_type}, priority=4,
+            {"task_type": task_type, "constraints": constraints or {}}, priority=4,
         )
         for _ in range(6):  # 3s timeout
             msgs = await self._bus.receive(
@@ -288,6 +309,24 @@ class Agent1:
                     return m.payload
             await asyncio.sleep(0.5)
         return None
+
+    async def _spawn_parallel_workers(self, plan, prompts: dict, context: str) -> list[str]:
+        limit = int(self._config.get("orchestration", {}).get("max_parallel_workers", len(plan.steps) or 1))
+        worker_ids: list[str] = []
+        for index in range(0, len(plan.steps), limit):
+            chunk = plan.steps[index:index + limit]
+            spawned = await asyncio.gather(*[
+                self._worker_mgr.spawn_worker(
+                    step.step_id,
+                    step.recommended_model,
+                    prompts[step.step_id],
+                    context,
+                    step.task_type,
+                )
+                for step in chunk
+            ])
+            worker_ids.extend(spawned)
+        return worker_ids
 
     async def _retry_failures(self, results: dict, plan, prompts: dict, context: str) -> dict:
         for worker_id, result in list(results.items()):

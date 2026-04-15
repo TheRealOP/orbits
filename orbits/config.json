@@ -19,5 +19,16 @@
     "backup_dir": "orbits/state/backups",
     "manifest_file": "orbits/state/backups/knowledge_manifest.json",
     "retention_count": 5
+  },
+  "orchestration": {
+    "max_parallel_workers": 2,
+    "sensitive_task_types": ["review", "planning", "knowledge_management"],
+    "provider_preferences": {
+      "research": "google",
+      "summarization": "google",
+      "knowledge_management": "google",
+      "coding": "openai",
+      "review": "anthropic"
+    }
   }
 }
