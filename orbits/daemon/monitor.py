@@ -55,6 +55,7 @@ class ModelStatuses:
     gpt_5_4: str
     interface_model: str
     last_updated: str
+    pending_handoff: bool = False
     opencode_status: str = "unknown"
     opencode_telemetry: str = "none"
     opencode_input_tokens: int = 0
@@ -235,6 +236,7 @@ def _status_signature(payload: dict) -> dict:
         "claude_haiku": payload.get("claude_haiku"),
         "gpt_5_4": payload.get("gpt_5_4"),
         "interface_model": payload.get("interface_model"),
+        "pending_handoff": payload.get("pending_handoff", False),
         "opencode_status": payload.get("opencode_status"),
         "opencode_telemetry": payload.get("opencode_telemetry"),
         "opencode_input_tokens": payload.get("opencode_input_tokens"),
@@ -250,8 +252,10 @@ def write_status(statuses: ModelStatuses, config: dict) -> None:
     status_path.parent.mkdir(parents=True, exist_ok=True)
     events_path.parent.mkdir(parents=True, exist_ok=True)
 
-    payload = asdict(statuses)
     previous = _read_status(status_path)
+    payload = asdict(statuses)
+    if previous and previous.get("pending_handoff") and not payload.get("pending_handoff", False):
+        payload["pending_handoff"] = True
     tmp_path = status_path.with_suffix(status_path.suffix + f".{os.getpid()}.tmp")
     tmp_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     tmp_path.replace(status_path)
@@ -275,12 +279,14 @@ class MonitorDaemon:
     def run_once(self) -> ModelStatuses:
         allowed, note = self._ram_preflight()
         if not allowed:
+            existing = _read_status(_resolve_path(self.config["daemon"]["status_file"])) or {}
             statuses = ModelStatuses(
                 claude_sonnet="unknown",
                 claude_haiku="unknown",
                 gpt_5_4="unknown",
                 interface_model="unknown",
                 last_updated=_utc_now(),
+                pending_handoff=bool(existing.get("pending_handoff", False)),
                 notes=note,
             )
             write_status(statuses, self.config)
@@ -292,6 +298,8 @@ class MonitorDaemon:
             _resolve_path(self.config["daemon"]["opencode_event_dir"]),
             self.config["daemon"].get("opencode_log_lookback_minutes", 10),
         )
+        existing = _read_status(_resolve_path(self.config["daemon"]["status_file"])) or {}
+        pending_handoff = bool(existing.get("pending_handoff", False))
 
         notes = []
         if claude_state == "rate_limited":
@@ -306,6 +314,8 @@ class MonitorDaemon:
             )
         if interface_state != "active":
             notes.append(f"Interface probe status={interface_state}.")
+        if pending_handoff:
+            notes.append("Pending handoff is active.")
 
         statuses = ModelStatuses(
             claude_sonnet=claude_state,
@@ -318,6 +328,7 @@ class MonitorDaemon:
             opencode_cached_input_tokens=opencode_metrics.cached_input_tokens,
             opencode_output_tokens=opencode_metrics.output_tokens,
             last_updated=_utc_now(),
+            pending_handoff=pending_handoff,
             notes=" ".join(notes),
         )
         write_status(statuses, self.config)

@@ -79,6 +79,55 @@ class TestMonitorDaemon(unittest.TestCase):
         self.assertEqual(status.notes, "RAM critical at 10.2 GB; monitor will not start.")
         write_status_mock.assert_called_once()
 
+    def test_write_status_preserves_pending_handoff(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = {
+                "daemon": {
+                    "status_file": str(Path(temp_dir) / "state" / "model_status.json"),
+                    "events_log": str(Path(temp_dir) / "state" / "model_status_events.jsonl"),
+                    "state_dir": str(Path(temp_dir) / "state"),
+                    "claude_log_dir": str(Path(temp_dir) / "logs"),
+                    "opencode_event_dir": str(Path(temp_dir) / "opencode"),
+                    "poll_interval_seconds": 1,
+                },
+                "models": monitor.DEFAULT_CONFIG["models"],
+            }
+            status_path = Path(config["daemon"]["status_file"])
+            status_path.parent.mkdir(parents=True, exist_ok=True)
+            status_path.write_text(json.dumps({"pending_handoff": True}), encoding="utf-8")
+            status = monitor.ModelStatuses("active", "active", "active", "active", "now")
+            monitor.write_status(status, config)
+            written = json.loads(status_path.read_text(encoding="utf-8"))
+        self.assertTrue(written["pending_handoff"])
+
+    def test_run_once_surfaces_pending_handoff_in_notes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            config = {
+                "daemon": {
+                    "status_file": str(base / "state" / "model_status.json"),
+                    "events_log": str(base / "state" / "model_status_events.jsonl"),
+                    "state_dir": str(base / "state"),
+                    "claude_log_dir": str(base / "logs"),
+                    "opencode_event_dir": str(base / "opencode"),
+                    "poll_interval_seconds": 1,
+                },
+                "models": monitor.DEFAULT_CONFIG["models"],
+            }
+            status_path = Path(config["daemon"]["status_file"])
+            status_path.parent.mkdir(parents=True, exist_ok=True)
+            status_path.write_text(json.dumps({"pending_handoff": True}), encoding="utf-8")
+            daemon = monitor.MonitorDaemon(config)
+            with patch("orbits.daemon.monitor.detect_claude", return_value="active"), patch(
+                "orbits.daemon.monitor.detect_interface", return_value="active"
+            ), patch("orbits.daemon.monitor.detect_opencode", return_value=monitor.OpenCodeStatus(status="active", telemetry="none")), patch(
+                "orbits.daemon.monitor.gate_launch"
+            ) as gate_launch_mock:
+                gate_launch_mock.return_value = type("Decision", (), {"state": "safe", "total_used_gb": 6.0})()
+                status = daemon.run_once()
+        self.assertTrue(status.pending_handoff)
+        self.assertIn("Pending handoff is active.", status.notes)
+
     def test_detect_opencode_active_when_process_present(self):
         fake_proc = type("Proc", (), {"info": {"name": "opencode", "cmdline": ["opencode"]}})()
         with patch("orbits.daemon.monitor.psutil.process_iter", return_value=[fake_proc]):
