@@ -13,7 +13,7 @@ Usage:
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, UTC
 
 from orchestrator.core.bus import MessageBus
 
@@ -51,7 +51,7 @@ class AgentRegistry:
             (
                 agent_id,
                 model,
-                datetime.utcnow().isoformat(),
+                datetime.now(UTC).isoformat(),
                 json.dumps(metadata or {}),
             ),
         )
@@ -82,7 +82,7 @@ class AgentRegistry:
                 m.get("tokens_used"),
                 m.get("context_pct"),
                 m.get("ram_mb"),
-                datetime.utcnow().isoformat(),
+                datetime.now(UTC).isoformat(),
                 agent_id,
             ),
         )
