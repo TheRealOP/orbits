@@ -26,14 +26,16 @@ tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
 # 1. Create a new tmux session in detached mode
 tmux new-session -d -s "$SESSION_NAME" -n "Orbits"
 
+mkdir -p "$REPO_ROOT/orbits/state/opencode"
+
 # Panel 0: Agent 1 Orchestrator
 tmux send-keys -t "$SESSION_NAME:Orbits.0" "export ORBITS_ZOMBIE_MODE=0" C-m
-tmux send-keys -t "$SESSION_NAME:Orbits.0" "opencode --agent agent1" C-m
+tmux send-keys -t "$SESSION_NAME:Orbits.0" "python3 scripts/opencode_jsonl_wrapper.py orbits/state/opencode/agent1.jsonl -- opencode --agent agent1 --json" C-m
 
 # 2. Split horizontal for Agent 2 memory
 tmux split-window -h -t "$SESSION_NAME:Orbits"
 tmux send-keys -t "$SESSION_NAME:Orbits.1" "export ORBITS_ZOMBIE_MODE=0" C-m
-tmux send-keys -t "$SESSION_NAME:Orbits.1" "opencode --agent agent2" C-m
+tmux send-keys -t "$SESSION_NAME:Orbits.1" "python3 scripts/opencode_jsonl_wrapper.py orbits/state/opencode/agent2.jsonl -- opencode --agent agent2 --json" C-m
 
 # 3. Split the right panel vertically for Claude Code Orchestrator
 tmux split-window -v -t "$SESSION_NAME:Orbits.1"
