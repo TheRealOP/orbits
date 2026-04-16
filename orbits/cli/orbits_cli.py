@@ -25,6 +25,18 @@ def _tmux_session_exists(name: str) -> bool:
     return subprocess.run(["tmux", "has-session", "-t", name], cwd=REPO_ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
 
 
+def _read_model_status(config: dict) -> dict:
+    status_path = Path(config["daemon"]["status_file"])
+    if not status_path.is_absolute():
+        status_path = REPO_ROOT / status_path
+    if not status_path.exists():
+        return {}
+    try:
+        return json.loads(status_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
 def cmd_start(args: argparse.Namespace) -> int:
     payload: dict[str, object] = {"started": []}
     if args.monitor:
@@ -54,10 +66,44 @@ def cmd_stop(args: argparse.Namespace) -> int:
 
 
 def cmd_status(_: argparse.Namespace) -> int:
+    config = load_config()
     payload = {
-        "monitor": daemon_status(load_config()),
+        "monitor": daemon_status(config),
         "orchestrator_tmux": _tmux_session_exists("orchestrator"),
         "opencode_tmux": _tmux_session_exists("orbits_orchestrator"),
+        "model_status": _read_model_status(config),
+    }
+    print(json.dumps(payload, indent=2))
+    return 0
+
+
+def cmd_dashboard(_: argparse.Namespace) -> int:
+    config = load_config()
+    status = _read_model_status(config)
+    payload = {
+        "monitor": daemon_status(config),
+        "sessions": {
+            "orchestrator_tmux": _tmux_session_exists("orchestrator"),
+            "opencode_tmux": _tmux_session_exists("orbits_orchestrator"),
+        },
+        "models": {
+            "claude_sonnet": status.get("claude_sonnet", "unknown"),
+            "gpt_5_4": status.get("gpt_5_4", "unknown"),
+            "interface_model": status.get("interface_model", "unknown"),
+            "pending_handoff": status.get("pending_handoff", False),
+        },
+        "tokens": {
+            "opencode_telemetry": status.get("opencode_telemetry", "none"),
+            "input_tokens": status.get("opencode_input_tokens", 0),
+            "cached_input_tokens": status.get("opencode_cached_input_tokens", 0),
+            "output_tokens": status.get("opencode_output_tokens", 0),
+            "total_known_tokens": (
+                status.get("opencode_input_tokens", 0)
+                + status.get("opencode_cached_input_tokens", 0)
+                + status.get("opencode_output_tokens", 0)
+            ),
+        },
+        "notes": status.get("notes", ""),
     }
     print(json.dumps(payload, indent=2))
     return 0
@@ -81,6 +127,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     status = subparsers.add_parser("status", help="Show Orbits component status")
     status.set_defaults(func=cmd_status)
+
+    dashboard = subparsers.add_parser("dashboard", help="Show built-in token and runtime dashboard")
+    dashboard.set_defaults(func=cmd_dashboard)
     return parser
 
 
