@@ -9,7 +9,8 @@
 #   5. MCP server probe (list-tools)
 #   6. Hook scripts parse (shellcheck if available, else bash -n)
 #   7. Submodule freshness vs upstream default branch
-#   8. Stale .omc hot paths reconcile
+#   8. Repo-local .claude isolation check
+#   9. Stale .omc hot paths reconcile
 
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -153,8 +154,17 @@ for sub in vendor/superlocalmemory vendor/oh-my-claudecode; do
     fi
 done
 
-# ── 8. Stale .omc hot paths ───────────────────────────────────────────────────
-header "8. .omc/project-memory.json hot paths"
+# ── 8. Repo-local .claude isolation ───────────────────────────────────────────
+header "8. Repo-local .claude isolation"
+if python3 scripts/verify_repo_isolation.py >/tmp/orbits-claude-isolation.json 2>/dev/null; then
+    pass ".claude symlinks stay inside this repo/fork paths"
+else
+    warn ".claude isolation check reported violations:"
+    sed 's/^/      /' /tmp/orbits-claude-isolation.json
+fi
+
+# ── 9. Stale .omc hot paths ───────────────────────────────────────────────────
+header "9. .omc/project-memory.json hot paths"
 OMC_MEM=".omc/project-memory.json"
 if [[ -f "$OMC_MEM" ]]; then
     STALE=$( python3 -c "

@@ -11,6 +11,7 @@ Usage:
     messages = await bus.receive("agent2", msg_types=[MsgType.CONTEXT_REQUEST])
 """
 import asyncio
+from datetime import UTC
 import json
 import logging
 from datetime import datetime
@@ -22,6 +23,11 @@ import aiosqlite
 from pydantic import BaseModel
 
 from orchestrator.core.config import BUS_DB_PATH, LOGS_DIR
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_KNOWLEDGE_LOGS = _REPO_ROOT / "Knowledge" / "logs"
+for _subdir in ("agent1", "agent2", "misc_agent"):
+    (_KNOWLEDGE_LOGS / _subdir).mkdir(parents=True, exist_ok=True)
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 _log = logging.getLogger("orchestrator.bus")
@@ -136,6 +142,18 @@ class MessageBus:
             )
             await self._conn.commit()
             msg_id = cur.lastrowid
+        self._journal_message(
+            {
+                "id": msg_id,
+                "created_at": datetime.now(UTC).isoformat(),
+                "event": "send",
+                "from_agent": from_agent,
+                "to_agent": to_agent,
+                "msg_type": msg_type.value,
+                "payload": payload,
+                "priority": priority,
+            }
+        )
         _log.debug("SEND id=%d %s→%s type=%s", msg_id, from_agent, to_agent, msg_type.value)
         return msg_id
 
@@ -183,8 +201,34 @@ class MessageBus:
             for r in rows
         ]
         if messages:
+            for message in messages:
+                self._journal_message(
+                    {
+                        "id": message.id,
+                        "created_at": message.created_at,
+                        "event": "receive",
+                        "from_agent": message.from_agent,
+                        "to_agent": message.to_agent,
+                        "msg_type": message.msg_type.value,
+                        "payload": message.payload,
+                        "priority": message.priority,
+                    }
+                )
             _log.debug("RECV agent=%s count=%d", agent_id, len(messages))
         return messages
+
+    def _journal_message(self, payload: dict[str, Any]) -> None:
+        participants = {payload.get("from_agent", ""), payload.get("to_agent", "")}
+        if any(name.startswith("agent1") for name in participants):
+            target = _KNOWLEDGE_LOGS / "agent1"
+        elif any(name.startswith("agent2") for name in participants):
+            target = _KNOWLEDGE_LOGS / "agent2"
+        else:
+            target = _KNOWLEDGE_LOGS / "misc_agent"
+
+        log_path = target / f"{datetime.now(UTC).date().isoformat()}.jsonl"
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload) + "\n")
 
     async def mark_read(self, message_id: int) -> None:
         """Mark a message as read so it won't be returned again."""

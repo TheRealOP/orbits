@@ -105,6 +105,17 @@ else
     warn "Set GEMINI_DISABLED=1 to run in slm-only mode."
 fi
 
+# ── 6. Check shellcheck availability ─────────────────────────────────────────
+step "ShellCheck availability"
+if command -v shellcheck &>/dev/null; then
+    ok "shellcheck found: $(command -v shellcheck)"
+else
+    warn "shellcheck not found — hook linting will fall back to bash -n"
+    if command -v brew &>/dev/null; then
+        warn "Install with: brew install shellcheck"
+    fi
+fi
+
 # ── Done ─────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${GREEN}Bootstrap complete.${NC}"
