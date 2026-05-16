@@ -5,6 +5,8 @@ tracker:
   project_slug: orbit-b35efc1720ee
   active_states: ["Todo", "In Progress"]
   terminal_states: ["Done", "Cancelled", "Duplicate", "Canceled"]
+  handoff_state: "Human Review"
+  handoff_on_success: true
 
 polling:
   interval_ms: 30000
@@ -14,6 +16,16 @@ workspace:
 
 hooks:
   timeout_ms: 60000
+  before_run: |
+    if [ ! -f pyproject.toml ]; then
+      tar \
+        --exclude=.git \
+        --exclude=.venv \
+        --exclude=.pytest_cache \
+        --exclude='__pycache__' \
+        -C /home/ojaspolakhare/GitHub/orbits \
+        -cf - . | tar -xf -
+    fi
 
 agents:
   default: claude
@@ -33,7 +45,7 @@ routing:
 runner:
   kind: cli
   commands:
-    claude: "claude -p --output-format stream-json"
+    claude: "/usr/bin/claude -p --verbose --output-format stream-json"
     codex: "codex exec --full-auto -"
   timeout_ms: 3600000
   stall_timeout_ms: 300000

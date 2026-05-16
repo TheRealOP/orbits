@@ -35,10 +35,10 @@ query CandidateIssues($projectSlug: String!, $states: [String!]!, $after: String
       branchName
       state { name }
       labels { nodes { name } }
-      relations {
+      inverseRelations(first: 50) {
         nodes {
           type
-          relatedIssue {
+          issue {
             id
             identifier
             state { name }
@@ -75,13 +75,53 @@ query IssuesByState($projectSlug: String!, $states: [String!]!) {
 """
 
 _BY_IDS_QUERY = """
-query IssueStates($ids: [ID!]!) {
-  nodes(ids: $ids) {
-    ... on Issue {
+query IssueStates($ids: [ID!]!, $first: Int!) {
+  issues(filter: { id: { in: $ids } }, first: $first) {
+    nodes {
       id
       identifier
+      title
+      description
+      priority
+      url
+      branchName
       state { name }
+      labels { nodes { name } }
+      inverseRelations(first: 50) {
+        nodes {
+          type
+          issue {
+            id
+            identifier
+            state { name }
+          }
+        }
+      }
+      createdAt
+      updatedAt
     }
+  }
+}
+"""
+
+_STATE_LOOKUP_QUERY = """
+query ResolveStateId($issueId: String!, $stateName: String!) {
+  issue(id: $issueId) {
+    team {
+      states(filter: { name: { eq: $stateName } }, first: 1) {
+        nodes {
+          id
+        }
+      }
+    }
+  }
+}
+"""
+
+_UPDATE_STATE_MUTATION = """
+mutation UpdateIssueState($issueId: String!, $stateId: String!) {
+  issueUpdate(id: $issueId, input: { stateId: $stateId }) {
+    success
   }
 }
 """
@@ -91,10 +131,14 @@ def _parse_issue(node: dict) -> Issue:
     labels = [lbl["name"].lower() for lbl in node.get("labels", {}).get("nodes", [])]
 
     blockers: list[BlockerRef] = []
-    for rel in node.get("relations", {}).get("nodes", []):
-        if rel.get("type") != "blocks":
+    relation_nodes = (
+        node.get("inverseRelations", {}).get("nodes")
+        or node.get("relations", {}).get("nodes", [])
+    )
+    for rel in relation_nodes:
+        if rel.get("type") not in (None, "blocks"):
             continue
-        ri = rel.get("relatedIssue", {})
+        ri = rel.get("issue") or rel.get("relatedIssue") or {}
         if ri:
             blockers.append(BlockerRef(
                 id=ri.get("id"),
@@ -215,19 +259,44 @@ class LinearTracker(TrackerAdapter):
     async def fetch_issue_states_by_ids(self, issue_ids: list[str]) -> list[Issue]:
         if not issue_ids:
             return []
-        data = await self._gql(_BY_IDS_QUERY, {"ids": issue_ids})
-        nodes = data.get("nodes", [])
+        requested_ids = list(dict.fromkeys(issue_ids))
         result: list[Issue] = []
-        for node in nodes:
-            if node:
-                parsed = _parse_minimal(node)
-                if parsed:
-                    result.append(parsed)
-        return result
+        for start in range(0, len(requested_ids), 50):
+            batch = requested_ids[start:start + 50]
+            data = await self._gql(
+                _BY_IDS_QUERY,
+                {"ids": batch, "first": len(batch)},
+            )
+            nodes = data.get("issues", {}).get("nodes", [])
+            result.extend(_parse_issue(n) for n in nodes if n)
+
+        order = {issue_id: index for index, issue_id in enumerate(requested_ids)}
+        return sorted(result, key=lambda issue: order.get(issue.id, len(order)))
 
     async def execute_graphql(self, query: str, variables: dict | None = None) -> dict:
         """linear_graphql client-side tool — Symphony §10.5."""
         return await self._gql(query, variables or {})
+
+    async def transition_issue_state(self, issue_id: str, state_name: str) -> bool:
+        lookup = await self._gql(
+            _STATE_LOOKUP_QUERY,
+            {"issueId": issue_id, "stateName": state_name},
+        )
+        state_id = (
+            lookup.get("issue", {})
+            .get("team", {})
+            .get("states", {})
+            .get("nodes", [{}])[0]
+            .get("id")
+        )
+        if not state_id:
+            raise RuntimeError(f"linear_state_not_found: {state_name}")
+
+        result = await self._gql(
+            _UPDATE_STATE_MUTATION,
+            {"issueId": issue_id, "stateId": state_id},
+        )
+        return result.get("issueUpdate", {}).get("success") is True
 
     async def aclose(self) -> None:
         await self._client.aclose()

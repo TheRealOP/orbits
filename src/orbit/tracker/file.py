@@ -113,3 +113,7 @@ class FileTracker(TrackerAdapter):
             )
         except OSError as exc:
             log.error("file_tracker_write_failed error=%s", exc)
+
+    async def transition_issue_state(self, issue_id: str, state_name: str) -> bool:
+        self.write_state(issue_id, state_name)
+        return True

@@ -70,7 +70,7 @@ class CLIRunner:
         proc: asyncio.subprocess.Process | None = None
         try:
             proc = await asyncio.create_subprocess_exec(
-                _shell_path(), "-lc", command,
+                _shell_path(), "-c", command,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -104,6 +104,7 @@ class CLIRunner:
                 proc.stdin.write(prompt_bytes)
                 await proc.stdin.drain()
                 proc.stdin.close()
+                await proc.stdin.wait_closed()
             except Exception:
                 pass
 

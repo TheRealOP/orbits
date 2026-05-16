@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -71,6 +71,7 @@ class Orchestrator:
 
         # Background tasks managed by the orchestrator
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        self._handoff_completed_issue_ids: set[str] = set()
 
     # ------------------------------------------------------------------
     # Public API
@@ -320,7 +321,7 @@ class Orchestrator:
     # Dispatch eligibility — Symphony §8.2 + Orbit §3.6
     # ------------------------------------------------------------------
 
-    def _is_eligible(self, issue: Issue) -> bool:
+    def _is_eligible(self, issue: Issue, *, ignore_claimed: bool = False) -> bool:
         """Return True if this issue may be dispatched right now."""
         assert self._cfg is not None
         assert self._state is not None
@@ -339,7 +340,9 @@ class Orchestrator:
             return False
 
         # Not already running or claimed
-        if issue.id in state.running or issue.id in state.claimed:
+        if issue.id in state.running:
+            return False
+        if not ignore_claimed and issue.id in state.claimed:
             return False
 
         # Global slot check
@@ -547,7 +550,10 @@ class Orchestrator:
                 ws.path,
                 on_event=_on_event,
             )
-            log.info("DEBUG_runner_returned exit_code=%d", exit_code)
+            if exit_code != 0:
+                error_msg = self._last_runner_message(issue.id) or f"exit_code={exit_code}"
+            elif await self._handoff_issue_on_success(issue):
+                self._handoff_completed_issue_ids.add(issue.id)
 
             # 4. after_run hook (best effort)
             await run_hook_best_effort(
@@ -602,7 +608,6 @@ class Orchestrator:
                 self._state.agent_totals.seconds_running += elapsed
 
             # Signal orchestrator
-            log.info("DEBUG_worker_queue_put issue=%s exit_code=%d error=%s", issue.identifier, exit_code, error_msg)
             try:
                 self._worker_done_queue.put_nowait((issue.id, exit_code, error_msg))
             except Exception:
@@ -635,6 +640,75 @@ class Orchestrator:
         if event.event == RunnerEventType.TURN_COMPLETED:
             sess.turn_count += 1
 
+        message = _truncate_log_message(event.message)
+        if event.event == RunnerEventType.STREAMING:
+            if message.startswith("[stderr]"):
+                log.warning(
+                    "runner_stream issue=%s event=%s message=%s",
+                    entry.issue.identifier, event.event.value, message,
+                )
+            else:
+                log.debug(
+                    "runner_stream issue=%s event=%s message=%s",
+                    entry.issue.identifier, event.event.value, message,
+                )
+        elif event.event in {
+            RunnerEventType.STARTUP_FAILED,
+            RunnerEventType.TURN_FAILED,
+            RunnerEventType.TURN_TIMEOUT,
+            RunnerEventType.STALLED,
+        }:
+            log.warning(
+                "runner_event issue=%s event=%s exit_code=%s message=%s",
+                entry.issue.identifier, event.event.value, event.exit_code, message,
+            )
+        else:
+            log.info(
+                "runner_event issue=%s event=%s exit_code=%s message=%s",
+                entry.issue.identifier, event.event.value, event.exit_code, message,
+            )
+
+    def _last_runner_message(self, issue_id: str) -> str | None:
+        if self._state is None:
+            return None
+        entry = self._state.running.get(issue_id)
+        if entry is None or entry.session is None:
+            return None
+        return entry.session.last_message or None
+
+    async def _handoff_issue_on_success(self, issue: Issue) -> bool:
+        assert self._cfg is not None
+        assert self._tracker is not None
+
+        if not self._cfg.tracker.handoff_on_success:
+            return False
+
+        handoff_state = self._cfg.tracker.handoff_state
+        if not handoff_state:
+            return False
+
+        try:
+            moved = await self._tracker.transition_issue_state(issue.id, handoff_state)
+        except Exception as exc:
+            log.warning(
+                "issue_handoff_failed issue=%s state=%s error=%s",
+                issue.identifier, handoff_state, exc,
+            )
+            return False
+
+        if moved:
+            log.info(
+                "issue_handoff_requested issue=%s state=%s",
+                issue.identifier, handoff_state,
+            )
+            return True
+
+        log.debug(
+            "issue_handoff_not_supported issue=%s state=%s",
+            issue.identifier, handoff_state,
+        )
+        return False
+
     # ------------------------------------------------------------------
     # Worker done handling — Symphony §16.6
     # ------------------------------------------------------------------
@@ -666,6 +740,17 @@ class Orchestrator:
         )
 
         if exit_code == 0:
+            if issue_id in self._handoff_completed_issue_ids:
+                self._handoff_completed_issue_ids.discard(issue_id)
+                self._state.completed.add(issue_id)
+                self._state.claimed.discard(issue_id)
+                self._state.retry_attempts.pop(issue_id, None)
+                log.info(
+                    "issue_handoff_complete issue=%s state=%s",
+                    entry.issue.identifier, self._cfg.tracker.handoff_state,
+                )
+                return
+
             # Normal exit: schedule continuation retry with 1000ms delay (attempt=1)
             log.info(
                 "issue_completed_scheduling_continuation issue=%s", entry.issue.identifier
@@ -700,7 +785,7 @@ class Orchestrator:
     ) -> None:
         assert self._state is not None
 
-        due_at = datetime.now(timezone.utc)
+        due_at = datetime.now(timezone.utc) + timedelta(milliseconds=delay_ms)
         retry_entry = RetryEntry(
             issue_id=issue.id,
             identifier=issue.identifier,
@@ -730,10 +815,10 @@ class Orchestrator:
         assert self._cfg is not None
         assert self._tracker is not None
 
-        # Remove from retry queue and release claim so _is_eligible can evaluate freely
+        # Remove from retry queue. Keep claim while retry is evaluating so poll cannot
+        # concurrently dispatch the same issue.
         self._state.retry_attempts.pop(issue_id, None)
         self._retry_handles.pop(issue_id, None)
-        self._state.claimed.discard(issue_id)
 
         # 1. Fetch current candidate issues
         candidates = await self._fetch_candidates()
@@ -742,6 +827,7 @@ class Orchestrator:
         # 2. Issue not found → claim already released above
         if issue is None:
             log.info("retry_issue_not_found issue_id=%s releasing_claim", issue_id)
+            self._state.claimed.discard(issue_id)
             return
 
         terminal = self._cfg.tracker.terminal_states
@@ -753,10 +839,11 @@ class Orchestrator:
                 "retry_issue_not_active issue=%s state=%s releasing_claim",
                 issue.identifier, issue.state,
             )
+            self._state.claimed.discard(issue_id)
             return
 
         # 3b. Global slots available → re-dispatch (dispatch re-adds to claimed)
-        if self._has_global_slot() and self._is_eligible(issue):
+        if self._has_global_slot() and self._is_eligible(issue, ignore_claimed=True):
             log.info(
                 "retry_dispatching issue=%s attempt=%d", issue.identifier, attempt
             )
@@ -968,6 +1055,12 @@ class Orchestrator:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _truncate_log_message(message: str, limit: int = 1000) -> str:
+    if len(message) <= limit:
+        return message
+    return message[:limit] + "...<truncated>"
 
 
 def _issue_sort_key(issue: Issue):

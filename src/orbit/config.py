@@ -52,6 +52,8 @@ class TrackerConfig:
     terminal_states: list[str] = field(
         default_factory=lambda: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
     )
+    handoff_state: str = "Human Review"
+    handoff_on_success: bool = True
     # GitHub-specific
     repo: str = ""
     active_labels: list[str] = field(default_factory=lambda: ["orbit:todo", "orbit:in-progress"])
@@ -185,6 +187,8 @@ def _parse_tracker(raw: dict, workflow_dir: Path) -> TrackerConfig:
     cfg.terminal_states = raw.get(
         "terminal_states", ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
     )
+    cfg.handoff_state = raw.get("handoff_state", "Human Review")
+    cfg.handoff_on_success = bool(raw.get("handoff_on_success", True))
     cfg.repo = raw.get("repo", "")
     cfg.active_labels = raw.get("active_labels", ["orbit:todo", "orbit:in-progress"])
     cfg.running_label = raw.get("running_label", "orbit:in-progress")

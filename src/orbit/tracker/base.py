@@ -22,3 +22,7 @@ class TrackerAdapter(ABC):
     # Labels variant for GitHub — no-op by default for other trackers
     async def fetch_issues_by_labels(self, label_names: list[str]) -> list[Issue]:
         return []
+
+    async def transition_issue_state(self, issue_id: str, state_name: str) -> bool:
+        """Move an issue to a tracker state when supported."""
+        return False

@@ -268,10 +268,10 @@ async def test_fetch_issues_by_states_single_state():
 @respx.mock
 async def test_fetch_issue_states_by_ids():
     respx.post(ENDPOINT).mock(return_value=gql_response({
-        "nodes": [
+        "issues": {"nodes": [
             {"id": "id1", "identifier": "MT-1", "state": {"name": "Todo"}},
             {"id": "id2", "identifier": "MT-2", "state": {"name": "Done"}},
-        ]
+        ]}
     }))
     tracker = LinearTracker(make_cfg())
     issues = await tracker.fetch_issue_states_by_ids(["id1", "id2"])
@@ -296,10 +296,10 @@ async def test_fetch_issue_states_by_ids_empty_returns_empty():
 async def test_fetch_issue_states_by_ids_skips_null_nodes():
     """Null nodes in the response (e.g. deleted issues) should be skipped."""
     respx.post(ENDPOINT).mock(return_value=gql_response({
-        "nodes": [
+        "issues": {"nodes": [
             {"id": "id1", "identifier": "MT-1", "state": {"name": "Todo"}},
             None,
-        ]
+        ]}
     }))
     tracker = LinearTracker(make_cfg())
     issues = await tracker.fetch_issue_states_by_ids(["id1", "id-deleted"])
@@ -470,3 +470,24 @@ async def test_execute_graphql_with_variables():
     )
     await tracker.aclose()
     assert result == {"result": True}
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_transition_issue_state_resolves_state_and_updates_issue():
+    respx.post(ENDPOINT).mock(side_effect=[
+        gql_response({
+            "issue": {
+                "team": {
+                    "states": {
+                        "nodes": [{"id": "state-human-review"}],
+                    },
+                },
+            },
+        }),
+        gql_response({"issueUpdate": {"success": True}}),
+    ])
+    tracker = LinearTracker(make_cfg())
+    moved = await tracker.transition_issue_state("issue-id", "Human Review")
+    await tracker.aclose()
+    assert moved is True
