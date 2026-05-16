@@ -14,6 +14,8 @@ defmodule OrbitElixir.MixProject do
         ],
         ignore_modules: [
           OrbitElixir.Config,
+          OrbitElixir.AgentProvider,
+          OrbitElixir.AgentHarness.CLI,
           OrbitElixir.Linear.Client,
           OrbitElixir.SpecsCheck,
           OrbitElixir.Orchestrator,
