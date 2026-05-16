@@ -1,9 +1,11 @@
 defmodule OrbitElixir.AgentRunner do
   @moduledoc """
-  Executes a single Linear issue in its workspace with Codex.
+  Executes a single Linear issue in its workspace with the selected agent provider.
   """
 
   require Logger
+  alias OrbitElixir.AgentHarness.CLI, as: AgentCLI
+  alias OrbitElixir.AgentProvider
   alias OrbitElixir.Codex.AppServer
   alias OrbitElixir.{Config, Linear.Issue, PromptBuilder, Tracker, Workspace}
 
@@ -35,7 +37,7 @@ defmodule OrbitElixir.AgentRunner do
 
         try do
           with :ok <- Workspace.run_before_run_hook(workspace, issue, worker_host) do
-            run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host)
+            run_agent_turns(workspace, issue, codex_update_recipient, opts, worker_host)
           end
         after
           Workspace.run_after_run_hook(workspace, issue, worker_host)
@@ -76,42 +78,62 @@ defmodule OrbitElixir.AgentRunner do
 
   defp send_worker_runtime_info(_recipient, _issue, _worker_host, _workspace), do: :ok
 
-  defp run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host) do
+  defp run_agent_turns(workspace, issue, codex_update_recipient, opts, worker_host) do
+    with {:ok, provider, reason} <- AgentProvider.select(issue) do
+      Logger.info("Selected agent provider for #{issue_context(issue)} provider=#{provider["name"]} harness=#{provider["harness"]} reason=#{reason}")
+
+      case provider["harness"] do
+        "codex_app_server" ->
+          run_codex_turns(provider, workspace, issue, codex_update_recipient, opts, worker_host)
+
+        "cli" ->
+          run_cli_turns(provider, workspace, issue, codex_update_recipient, opts, worker_host)
+
+        harness ->
+          {:error, {:unsupported_agent_harness, harness}}
+      end
+    end
+  end
+
+  defp run_codex_turns(provider, workspace, issue, codex_update_recipient, opts, worker_host) do
     max_turns = Keyword.get(opts, :max_turns, Config.settings!().agent.max_turns)
     issue_state_fetcher = Keyword.get(opts, :issue_state_fetcher, &Tracker.fetch_issue_states_by_ids/1)
+    context = turn_context(workspace, issue, codex_update_recipient, opts, issue_state_fetcher, worker_host)
 
-    with {:ok, session} <- AppServer.start_session(workspace, worker_host: worker_host) do
+    with {:ok, session} <-
+           AppServer.start_session(workspace,
+             worker_host: worker_host,
+             command: provider["command"],
+             agent_provider: provider
+           ) do
       try do
-        do_run_codex_turns(session, workspace, issue, codex_update_recipient, opts, issue_state_fetcher, 1, max_turns)
+        do_run_codex_turns(session, provider, context, 1, max_turns)
       after
         AppServer.stop_session(session)
       end
     end
   end
 
-  defp do_run_codex_turns(app_session, workspace, issue, codex_update_recipient, opts, issue_state_fetcher, turn_number, max_turns) do
-    prompt = build_turn_prompt(issue, opts, turn_number, max_turns)
+  defp do_run_codex_turns(app_session, provider, context, turn_number, max_turns) do
+    prompt = build_turn_prompt(context.issue, context.opts, turn_number, max_turns, provider)
 
     with {:ok, turn_session} <-
            AppServer.run_turn(
              app_session,
              prompt,
-             issue,
-             on_message: codex_message_handler(codex_update_recipient, issue)
+             context.issue,
+             on_message: codex_message_handler(context.codex_update_recipient, context.issue)
            ) do
-      Logger.info("Completed agent run for #{issue_context(issue)} session_id=#{turn_session[:session_id]} workspace=#{workspace} turn=#{turn_number}/#{max_turns}")
+      Logger.info("Completed agent run for #{issue_context(context.issue)} session_id=#{turn_session[:session_id]} workspace=#{context.workspace} turn=#{turn_number}/#{max_turns}")
 
-      case continue_with_issue?(issue, issue_state_fetcher) do
+      case continue_with_issue?(context.issue, context.issue_state_fetcher) do
         {:continue, refreshed_issue} when turn_number < max_turns ->
           Logger.info("Continuing agent run for #{issue_context(refreshed_issue)} after normal turn completion turn=#{turn_number}/#{max_turns}")
 
           do_run_codex_turns(
             app_session,
-            workspace,
-            refreshed_issue,
-            codex_update_recipient,
-            opts,
-            issue_state_fetcher,
+            provider,
+            %{context | issue: refreshed_issue},
             turn_number + 1,
             max_turns
           )
@@ -130,18 +152,78 @@ defmodule OrbitElixir.AgentRunner do
     end
   end
 
-  defp build_turn_prompt(issue, opts, 1, _max_turns), do: PromptBuilder.build_prompt(issue, opts)
+  defp run_cli_turns(provider, workspace, issue, codex_update_recipient, opts, worker_host) do
+    max_turns = Keyword.get(opts, :max_turns, Config.settings!().agent.max_turns)
+    issue_state_fetcher = Keyword.get(opts, :issue_state_fetcher, &Tracker.fetch_issue_states_by_ids/1)
+    context = turn_context(workspace, issue, codex_update_recipient, opts, issue_state_fetcher, worker_host)
 
-  defp build_turn_prompt(_issue, _opts, turn_number, max_turns) do
+    do_run_cli_turns(provider, context, 1, max_turns)
+  end
+
+  defp do_run_cli_turns(provider, context, turn_number, max_turns) do
+    prompt = build_turn_prompt(context.issue, context.opts, turn_number, max_turns, provider)
+
+    with {:ok, turn_session} <-
+           AgentCLI.run_turn(
+             provider,
+             context.workspace,
+             prompt,
+             context.issue,
+             worker_host: context.worker_host,
+             on_message: codex_message_handler(context.codex_update_recipient, context.issue)
+           ) do
+      Logger.info(
+        "Completed agent run for #{issue_context(context.issue)} session_id=#{turn_session[:session_id]} workspace=#{context.workspace} provider=#{provider["name"]} turn=#{turn_number}/#{max_turns}"
+      )
+
+      case continue_with_issue?(context.issue, context.issue_state_fetcher) do
+        {:continue, refreshed_issue} when turn_number < max_turns ->
+          Logger.info("Continuing agent run for #{issue_context(refreshed_issue)} after normal turn completion provider=#{provider["name"]} turn=#{turn_number}/#{max_turns}")
+
+          do_run_cli_turns(
+            provider,
+            %{context | issue: refreshed_issue},
+            turn_number + 1,
+            max_turns
+          )
+
+        {:continue, refreshed_issue} ->
+          Logger.info("Reached agent.max_turns for #{issue_context(refreshed_issue)} with issue still active; returning control to orchestrator")
+
+          :ok
+
+        {:done, _refreshed_issue} ->
+          :ok
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+  end
+
+  defp build_turn_prompt(issue, opts, 1, _max_turns, _provider), do: PromptBuilder.build_prompt(issue, opts)
+
+  defp build_turn_prompt(_issue, _opts, turn_number, max_turns, provider) do
     """
     Continuation guidance:
 
-    - The previous Codex turn completed normally, but the Linear issue is still in an active state.
+    - The previous #{provider["display_name"] || provider["name"]} turn completed normally, but the Linear issue is still in an active state.
     - This is continuation turn ##{turn_number} of #{max_turns} for the current agent run.
     - Resume from the current workspace and workpad state instead of restarting from scratch.
-    - The original task instructions and prior turn context are already present in this thread, so do not restate them before acting.
+    - Use the current files and Linear workpad as the source of truth for prior progress.
     - Focus on the remaining ticket work and do not end the turn while the issue stays active unless you are truly blocked.
     """
+  end
+
+  defp turn_context(workspace, issue, codex_update_recipient, opts, issue_state_fetcher, worker_host) do
+    %{
+      workspace: workspace,
+      issue: issue,
+      codex_update_recipient: codex_update_recipient,
+      opts: opts,
+      issue_state_fetcher: issue_state_fetcher,
+      worker_host: worker_host
+    }
   end
 
   defp continue_with_issue?(%Issue{id: issue_id} = issue, issue_state_fetcher) when is_binary(issue_id) do

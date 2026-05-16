@@ -28,12 +28,22 @@ hooks:
 agent:
   max_concurrent_agents: 10
   max_turns: 20
+  default_provider: codex
 codex:
   command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
   approval_policy: never
   thread_sandbox: workspace-write
   turn_sandbox_policy:
     type: workspaceWrite
+providers:
+  claude:
+    harness: cli
+    command: claude -p --permission-mode acceptEdits --model "$ORBIT_AGENT_MODEL" "$ORBIT_AGENT_PROMPT"
+    model: sonnet
+  gemini:
+    harness: cli
+    command: gemini --approval-mode=auto_edit --model "$ORBIT_AGENT_MODEL" -p "$ORBIT_AGENT_PROMPT"
+    model: auto
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}`

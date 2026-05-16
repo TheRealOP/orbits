@@ -3,6 +3,7 @@ defmodule OrbitElixir.Config do
   Runtime configuration loaded from `WORKFLOW.md`.
   """
 
+  alias OrbitElixir.AgentProvider
   alias OrbitElixir.Config.Schema
   alias OrbitElixir.Workflow
 
@@ -129,7 +130,14 @@ defmodule OrbitElixir.Config do
         {:error, :missing_linear_project_slug}
 
       true ->
-        :ok
+        validate_provider_semantics(settings)
+    end
+  end
+
+  defp validate_provider_semantics(settings) do
+    case AgentProvider.validate(settings) do
+      :ok -> :ok
+      {:error, message} -> {:error, {:invalid_workflow_config, message}}
     end
   end
 

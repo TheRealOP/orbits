@@ -15,13 +15,13 @@ This directory contains the current Elixir/OTP implementation of Orbit, based on
 
 1. Polls Linear for candidate work
 2. Creates a workspace per issue
-3. Launches Codex in [App Server mode](https://developers.openai.com/codex/app-server/) inside the
-   workspace
-4. Sends a workflow prompt to Codex
-5. Keeps Codex working on the issue until the work is done
+3. Selects an agent provider for the issue, defaulting to Codex and routing UI/UX work to Gemini
+4. Launches the selected provider inside the workspace
+5. Sends a workflow prompt to the selected agent
+6. Keeps the agent working on the issue until the work is done
 
-During app-server sessions, Orbit also serves a client-side `linear_graphql` tool so that repo
-skills can make raw Linear GraphQL calls.
+During Codex app-server sessions, Orbit also serves a client-side `linear_graphql` tool so that
+repo skills can make raw Linear GraphQL calls.
 
 If a claimed issue moves to a terminal state (`Done`, `Closed`, `Cancelled`, or `Duplicate`),
 Orbit stops the active agent for that issue and cleans up matching workspaces.
@@ -81,7 +81,7 @@ Optional flags:
 - `--port` also starts the Phoenix observability service (default: disabled)
 
 The `WORKFLOW.md` file uses YAML front matter for configuration, plus a Markdown body used as the
-Codex session prompt.
+agent session prompt.
 
 Minimal example:
 
@@ -98,8 +98,18 @@ hooks:
 agent:
   max_concurrent_agents: 10
   max_turns: 20
+  default_provider: codex
 codex:
   command: codex app-server
+providers:
+  claude:
+    harness: cli
+    command: claude -p --permission-mode acceptEdits --model "$ORBIT_AGENT_MODEL" "$ORBIT_AGENT_PROMPT"
+    model: sonnet
+  gemini:
+    harness: cli
+    command: gemini --approval-mode=auto_edit --model "$ORBIT_AGENT_MODEL" -p "$ORBIT_AGENT_PROMPT"
+    model: auto
 ---
 
 You are working on a Linear issue {{ issue.identifier }}.
@@ -119,8 +129,15 @@ Notes:
 - When `codex.turn_sandbox_policy` is set explicitly, Orbit passes the map through to Codex
   unchanged. Compatibility then depends on the targeted Codex app-server version rather than local
   Orbit validation.
-- `agent.max_turns` caps how many back-to-back Codex turns Orbit will run in a single agent
+- `agent.max_turns` caps how many back-to-back agent turns Orbit will run in a single agent
   invocation when a turn completes normally but the issue is still in an active state. Default: `20`.
+- `agent.default_provider` defaults to `codex`. Built-in providers are `codex`, `claude`, and
+  `gemini`; add custom entries under `providers` for additional CLI-based harnesses.
+- `agent.provider_routes` can add ordered route rules with `provider`, `labels`, and `keywords`.
+  Built-in routes send UI/UX, frontend, layout, visual, and accessibility tasks to Gemini, send
+  analysis/docs/research/review tasks to Claude, and fall back to Codex.
+- CLI providers receive `ORBIT_AGENT_PROMPT`, `ORBIT_AGENT_PROVIDER`,
+  `ORBIT_AGENT_MODEL`, and `ORBIT_ISSUE_IDENTIFIER` in their environment.
 - If the Markdown body is blank, Orbit uses a default prompt template that includes the issue
   identifier, title, and body.
 - Use `hooks.after_create` to bootstrap a fresh workspace. For a Git-backed repo, you can run

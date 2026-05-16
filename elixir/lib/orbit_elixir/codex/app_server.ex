@@ -39,10 +39,12 @@ defmodule OrbitElixir.Codex.AppServer do
   @spec start_session(Path.t(), keyword()) :: {:ok, session()} | {:error, term()}
   def start_session(workspace, opts \\ []) do
     worker_host = Keyword.get(opts, :worker_host)
+    command = Keyword.get(opts, :command, Config.settings!().codex.command)
+    agent_provider = Keyword.get(opts, :agent_provider, %{"name" => "codex", "harness" => "codex_app_server", "model" => nil})
 
     with {:ok, expanded_workspace} <- validate_workspace_cwd(workspace, worker_host),
-         {:ok, port} <- start_port(expanded_workspace, worker_host) do
-      metadata = port_metadata(port, worker_host)
+         {:ok, port} <- start_port(expanded_workspace, worker_host, command) do
+      metadata = port_metadata(port, worker_host, agent_provider)
 
       with {:ok, session_policies} <- session_policies(expanded_workspace, worker_host),
            {:ok, thread_id} <- do_start_session(port, expanded_workspace, session_policies) do
@@ -186,7 +188,7 @@ defmodule OrbitElixir.Codex.AppServer do
     end
   end
 
-  defp start_port(workspace, nil) do
+  defp start_port(workspace, nil, command) do
     executable = System.find_executable("bash")
 
     if is_nil(executable) do
@@ -199,7 +201,7 @@ defmodule OrbitElixir.Codex.AppServer do
             :binary,
             :exit_status,
             :stderr_to_stdout,
-            args: [~c"-lc", String.to_charlist(Config.settings!().codex.command)],
+            args: [~c"-lc", String.to_charlist(command)],
             cd: String.to_charlist(workspace),
             line: @port_line_bytes
           ]
@@ -209,20 +211,20 @@ defmodule OrbitElixir.Codex.AppServer do
     end
   end
 
-  defp start_port(workspace, worker_host) when is_binary(worker_host) do
-    remote_command = remote_launch_command(workspace)
+  defp start_port(workspace, worker_host, command) when is_binary(worker_host) do
+    remote_command = remote_launch_command(workspace, command)
     SSH.start_port(worker_host, remote_command, line: @port_line_bytes)
   end
 
-  defp remote_launch_command(workspace) when is_binary(workspace) do
+  defp remote_launch_command(workspace, command) when is_binary(workspace) do
     [
       "cd #{shell_escape(workspace)}",
-      "exec #{Config.settings!().codex.command}"
+      "exec #{command}"
     ]
     |> Enum.join(" && ")
   end
 
-  defp port_metadata(port, worker_host) when is_port(port) do
+  defp port_metadata(port, worker_host, agent_provider) when is_port(port) do
     base_metadata =
       case :erlang.port_info(port, :os_pid) do
         {:os_pid, os_pid} ->
@@ -231,6 +233,12 @@ defmodule OrbitElixir.Codex.AppServer do
         _ ->
           %{}
       end
+
+    base_metadata =
+      base_metadata
+      |> Map.put(:agent_provider, Map.get(agent_provider, "name", "codex"))
+      |> Map.put(:agent_harness, Map.get(agent_provider, "harness", "codex_app_server"))
+      |> Map.put(:agent_model, Map.get(agent_provider, "model"))
 
     case worker_host do
       host when is_binary(host) -> Map.put(base_metadata, :worker_host, host)
@@ -1012,7 +1020,9 @@ defmodule OrbitElixir.Codex.AppServer do
   end
 
   defp metadata_from_message(port, payload) do
-    port |> port_metadata(nil) |> maybe_set_usage(payload)
+    port
+    |> port_metadata(nil, %{"name" => "codex", "harness" => "codex_app_server", "model" => nil})
+    |> maybe_set_usage(payload)
   end
 
   defp maybe_set_usage(metadata, payload) when is_map(payload) do
