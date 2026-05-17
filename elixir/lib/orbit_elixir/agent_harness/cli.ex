@@ -5,6 +5,7 @@ defmodule OrbitElixir.AgentHarness.CLI do
 
   require Logger
 
+  alias OrbitElixir.AgentRuntime
   alias OrbitElixir.SSH
 
   @port_line_bytes 1_048_576
@@ -118,6 +119,7 @@ defmodule OrbitElixir.AgentHarness.CLI do
       payload
       |> Map.put(:event, event)
       |> Map.put(:timestamp, DateTime.utc_now())
+      |> AgentRuntime.attach_runtime_event()
 
     on_message.(payload)
   end

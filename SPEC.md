@@ -905,9 +905,65 @@ Invariant 3: Workspace key is sanitized.
 
 ## 10. Agent Runner Protocol (Coding Agent Integration)
 
-This section defines Orbit's language-neutral responsibilities when integrating a Codex
-app-server. The Codex app-server protocol for the targeted Codex version is the source of truth for
-protocol schemas, message payloads, transport framing, and method names.
+This section defines Orbit's language-neutral runtime responsibilities when integrating coding
+agents. Orbit's orchestration contract is provider-neutral; provider protocols such as Codex
+app-server, Claude CLI, Gemini CLI, or future adapters remain the source of truth for their own
+transport schemas, message payloads, framing, and method names.
+
+### 10.1 Provider-Neutral Runtime Interface
+
+Agent runtime adapters expose the following operations:
+
+- `start_session`
+  - Prepare provider resources for a per-issue workspace.
+  - Return a provider-neutral session descriptor containing `session_id`, provider name, harness,
+    workspace, and optional provider-specific state.
+- `send_turn`
+  - Start one unit of prompt work inside a session.
+  - Return a turn descriptor. Providers with native turn ids SHOULD expose them; one-shot CLI
+    providers MAY use the session id as their only durable identity.
+- `stream_events`
+  - Emit normalized runtime events until the active turn completes or fails.
+  - Preserve provider-specific frames in payload/raw fields instead of reshaping providers into the
+    Codex app-server protocol.
+- `stop_session`
+  - Terminate or release provider resources.
+- `read_diff`
+  - Return the current workspace diff using the workspace VCS or provider-native diff if available.
+- `summarize_result`
+  - Convert provider-specific completion data into a stable Orbit result summary.
+
+Normalized runtime events include:
+
+- `session_started`
+- `turn_started`
+- `output_delta`
+- `tool_event`
+- `diff_changed`
+- `approval_needed`
+- `turn_completed`
+- `turn_failed`
+
+Each normalized event SHOULD include:
+
+- `event` (one of the normalized event types)
+- `timestamp` (UTC timestamp)
+- `session_id`
+- `provider`
+- `harness`
+- `payload` (map)
+- OPTIONAL `turn_id` when the provider exposes a separate turn identity
+- OPTIONAL `raw` and `source_event` preserving provider-specific protocol details
+
+This contract intentionally does not require Claude, Gemini, or other CLI providers to mimic
+Codex's app-server thread/turn protocol. A CLI invocation can be represented as a short-lived
+session with stdout/stderr lines as `output_delta` events and process status as `turn_completed` or
+`turn_failed`.
+
+### 10.2 Codex App-Server Implementation Notes
+
+The Codex app-server protocol for the targeted Codex version is the source of truth for protocol
+schemas, message payloads, transport framing, and method names.
 
 Protocol source of truth:
 
@@ -919,7 +975,7 @@ Protocol source of truth:
 - Orbit-specific requirements in this section still control orchestration behavior, workspace
   selection, prompt construction, continuation handling, and observability extraction.
 
-### 10.1 Launch Contract
+### 10.3 Launch Contract
 
 Subprocess launch parameters:
 
@@ -938,7 +994,7 @@ RECOMMENDED additional process settings:
 
 - Max line size: 10 MB (for safe buffering)
 
-### 10.2 Session Startup Responsibilities
+### 10.4 Session Startup Responsibilities
 
 Reference: https://developers.openai.com/codex/app-server/
 
@@ -966,7 +1022,7 @@ Session identifiers:
 - Emit `session_id = "<thread_id>-<turn_id>"`
 - Reuse the same `thread_id` for all continuation turns inside one worker run
 
-### 10.3 Streaming Turn Processing
+### 10.5 Streaming Turn Processing
 
 The client processes app-server updates according to the targeted Codex app-server protocol until
 the active turn terminates.
@@ -992,7 +1048,7 @@ Transport handling requirements:
 - For stdio-based transports, keep protocol stream handling separate from diagnostic stderr
   handling unless the targeted protocol specifies otherwise.
 
-### 10.4 Emitted Runtime Events (Upstream to Orchestrator)
+### 10.6 Emitted Runtime Events (Upstream to Orchestrator)
 
 The app-server client emits structured events to the orchestrator callback. Each event SHOULD
 include:
@@ -1018,7 +1074,7 @@ Important emitted events include, for example:
 - `other_message`
 - `malformed`
 
-### 10.5 Approval, Tool Calls, and User Input Policy
+### 10.7 Approval, Tool Calls, and User Input Policy
 
 Approval, sandbox, and user-input behavior is implementation-defined.
 
