@@ -397,6 +397,7 @@ defmodule OrbitElixir.AgentRuntime do
 
   defp message_string_value(message, key) do
     case message_value(message, key) do
+      nil -> nil
       value when is_binary(value) and value != "" -> value
       value when is_atom(value) -> Atom.to_string(value)
       value when is_integer(value) -> Integer.to_string(value)

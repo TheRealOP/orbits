@@ -2,6 +2,7 @@ defmodule OrbitElixir.AgentRuntimeTest do
   use OrbitElixir.TestSupport
 
   alias OrbitElixir.AgentRuntime
+  alias OrbitElixir.AgentRuntime.CodexAppServer, as: CodexRuntime
 
   test "declares the provider-neutral runtime operations" do
     assert AgentRuntime.operations() == [
@@ -76,6 +77,128 @@ defmodule OrbitElixir.AgentRuntimeTest do
                agent_provider: "codex",
                agent_harness: "codex_app_server",
                payload: %{"method" => "item/tool/call"}
+             })
+  end
+
+  test "handles runtime event validation and normalization edge cases" do
+    assert {:error, :event_must_be_map} = AgentRuntime.validate_event(:not_a_map)
+    assert {:error, :message_must_be_map} = AgentRuntime.normalize_message(:not_a_map)
+    assert AgentRuntime.attach_runtime_event(:not_a_map) == :not_a_map
+
+    assert {:ok, %{event: :turn_completed, timestamp: "2026-05-17T00:00:00Z"}} =
+             AgentRuntime.new_event("turn_completed", %{
+               "timestamp" => "2026-05-17T00:00:00Z",
+               "session_id" => "session-1",
+               "provider" => "codex",
+               "harness" => "codex_app_server",
+               "payload" => %{"ok" => true}
+             })
+
+    assert {:error, {:unknown_event_type, "unknown"}} =
+             AgentRuntime.new_event("unknown", %{
+               session_id: "session-1",
+               provider: "codex",
+               harness: "codex_app_server",
+               payload: %{}
+             })
+
+    assert {:error, {:missing_or_invalid, :payload}} =
+             AgentRuntime.new_event(:turn_completed, %{
+               session_id: "session-1",
+               provider: "codex",
+               harness: "codex_app_server",
+               payload: nil
+             })
+
+    assert {:error, {:missing_or_invalid, :timestamp}} =
+             AgentRuntime.validate_event(%{
+               event: :turn_completed,
+               timestamp: nil,
+               session_id: "session-1",
+               provider: "codex",
+               harness: "codex_app_server",
+               payload: %{}
+             })
+
+    assert :ok =
+             AgentRuntime.validate_event(%{
+               event: :turn_completed,
+               timestamp: "2026-05-17T00:00:00Z",
+               session_id: "session-1",
+               provider: "codex",
+               harness: "codex_app_server",
+               payload: %{}
+             })
+
+    assert {:ok, %{event: :diff_changed}} =
+             AgentRuntime.normalize_message(%{
+               event: :notification,
+               session_id: "session-1",
+               provider: "codex",
+               harness: "codex_app_server",
+               payload: %{"method" => "workspace/diffChanged"}
+             })
+
+    assert {:ok, %{session_id: "123"}} =
+             AgentRuntime.normalize_message(%{
+               event: :turn_completed,
+               session_id: 123,
+               provider: "codex",
+               harness: "codex_app_server",
+               payload: %{}
+             })
+
+    assert {:ok,
+            %{
+              timestamp: "2026-05-17T00:00:00Z",
+              session_id: "session_atom",
+              provider: "codex",
+              harness: "codex_app_server"
+            }} =
+             AgentRuntime.normalize_message(%{
+               event: :turn_completed,
+               timestamp: "2026-05-17T00:00:00Z",
+               session_id: :session_atom,
+               provider: :codex,
+               harness: :codex_app_server,
+               payload: %{}
+             })
+
+    assert {:ok, event_without_turn_id} =
+             AgentRuntime.normalize_message(%{
+               event: :turn_completed,
+               session_id: "session-1",
+               provider: "codex",
+               harness: "codex_app_server",
+               turn_id: [],
+               payload: %{}
+             })
+
+    assert %DateTime{} = event_without_turn_id.timestamp
+    refute Map.has_key?(event_without_turn_id, :turn_id)
+
+    assert {:error, {:missing_or_invalid, :session_id}} =
+             AgentRuntime.normalize_message(%{
+               event: :turn_completed,
+               provider: "codex",
+               harness: "codex_app_server",
+               payload: %{}
+             })
+
+    assert {:error, {:missing_or_invalid, :provider}} =
+             AgentRuntime.normalize_message(%{
+               event: :turn_completed,
+               session_id: "session-1",
+               harness: "codex_app_server",
+               payload: %{}
+             })
+
+    assert {:error, {:missing_or_invalid, :harness}} =
+             AgentRuntime.normalize_message(%{
+               event: :turn_completed,
+               session_id: "session-1",
+               provider: "codex",
+               payload: %{}
              })
   end
 
@@ -244,6 +367,144 @@ defmodule OrbitElixir.AgentRuntimeTest do
                            turn_id: "turn-runtime",
                            provider: "codex",
                            harness: "codex_app_server"
+                         }
+                       }}
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "Codex runtime adapter preserves app-server messages and normalized details" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "orbit-elixir-runtime-adapter-codex-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      workspace = Path.join(workspace_root, "DEV-RUNTIME-ADAPTER")
+      codex_binary = Path.join(test_root, "fake-codex")
+      File.mkdir_p!(workspace)
+
+      File.write!(codex_binary, """
+      #!/bin/sh
+      count=0
+      while IFS= read -r _line; do
+        count=$((count + 1))
+
+        case "$count" in
+          1)
+            printf '%s\\n' '{"id":1,"result":{}}'
+            ;;
+          2)
+            printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-adapter"}}}'
+            ;;
+          3)
+            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-adapter"}}}'
+            ;;
+          4)
+            printf '%s\\n' '{"method":"item/updated","params":{"message":"adapter output","kind":"codex-specific"}}'
+            printf '%s\\n' '{"method":"turn/completed","usage":{"input_tokens":3,"output_tokens":5},"details":{"provider":"codex"}}'
+            exit 0
+            ;;
+          *)
+            exit 0
+            ;;
+        esac
+      done
+      """)
+
+      File.chmod!(codex_binary, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        codex_command: "#{codex_binary} app-server"
+      )
+
+      provider = %{
+        "name" => "codex",
+        "display_name" => "Codex",
+        "harness" => "codex_app_server",
+        "command" => "#{codex_binary} app-server",
+        "model" => "gpt-test"
+      }
+
+      issue = %Issue{
+        id: "issue-runtime-adapter-codex",
+        identifier: "DEV-RUNTIME-ADAPTER",
+        title: "Runtime Codex Adapter",
+        description: "Normalize Codex events through adapter.",
+        labels: []
+      }
+
+      parent = self()
+      on_message = fn message -> send(parent, {:runtime_message, message}) end
+
+      assert {:ok, session} =
+               CodexRuntime.start_session(%{
+                 workspace: workspace,
+                 provider: "codex",
+                 harness: "codex_app_server",
+                 model: "gpt-test",
+                 config: %{provider: provider}
+               })
+
+      try do
+        assert {:ok, turn} =
+                 CodexRuntime.send_turn(session, %{
+                   prompt: "prompt",
+                   issue: issue
+                 })
+
+        assert {:ok, %{status: :completed, provider_result: %{session_id: "thread-adapter-turn-adapter"}}} =
+                 CodexRuntime.stream_events(session, turn, on_message)
+      after
+        CodexRuntime.stop_session(session)
+      end
+
+      assert_received {:runtime_message,
+                       %{
+                         event: :notification,
+                         payload: %{
+                           "method" => "item/updated",
+                           "params" => %{
+                             "kind" => "codex-specific",
+                             "message" => "adapter output"
+                           }
+                         },
+                         raw: raw_notification,
+                         runtime_event: %{
+                           event: :output_delta,
+                           source_event: :notification,
+                           provider: "codex",
+                           harness: "codex_app_server",
+                           model: "gpt-test",
+                           raw: runtime_raw,
+                           payload: %{
+                             "method" => "item/updated",
+                             "params" => %{"kind" => "codex-specific"}
+                           }
+                         }
+                       }}
+
+      assert runtime_raw == raw_notification
+
+      assert_received {:runtime_message,
+                       %{
+                         event: :turn_completed,
+                         usage: %{"input_tokens" => 3, "output_tokens" => 5},
+                         runtime_event: %{
+                           event: :turn_completed,
+                           session_id: "thread-adapter-turn-adapter",
+                           turn_id: "turn-adapter",
+                           provider: "codex",
+                           harness: "codex_app_server",
+                           payload: %{
+                             "method" => "turn/completed",
+                             "usage" => %{"input_tokens" => 3, "output_tokens" => 5},
+                             "details" => %{"provider" => "codex"}
+                           }
                          }
                        }}
     after
