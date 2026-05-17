@@ -16,6 +16,7 @@ defmodule OrbitElixir.MixProject do
           OrbitElixir.Config,
           OrbitElixir.AgentProvider,
           OrbitElixir.AgentHarness.CLI,
+          OrbitElixir.AgentRuntime.CodexAppServer,
           OrbitElixir.Linear.Client,
           OrbitElixir.SpecsCheck,
           OrbitElixir.Orchestrator,

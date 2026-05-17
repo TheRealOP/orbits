@@ -6,7 +6,7 @@ defmodule OrbitElixir.AgentRunner do
   require Logger
   alias OrbitElixir.AgentHarness.CLI, as: AgentCLI
   alias OrbitElixir.AgentProvider
-  alias OrbitElixir.Codex.AppServer
+  alias OrbitElixir.AgentRuntime.CodexAppServer, as: CodexRuntime
   alias OrbitElixir.{Config, Linear.Issue, PromptBuilder, Tracker, Workspace}
 
   @type worker_host :: String.t() | nil
@@ -101,15 +101,20 @@ defmodule OrbitElixir.AgentRunner do
     context = turn_context(workspace, issue, codex_update_recipient, opts, issue_state_fetcher, worker_host)
 
     with {:ok, session} <-
-           AppServer.start_session(workspace,
-             worker_host: worker_host,
-             command: provider["command"],
-             agent_provider: provider
-           ) do
+           CodexRuntime.start_session(%{
+             workspace: workspace,
+             provider: provider["name"],
+             harness: provider["harness"],
+             model: provider["model"],
+             config: %{
+               provider: provider,
+               worker_host: worker_host
+             }
+           }) do
       try do
         do_run_codex_turns(session, provider, context, 1, max_turns)
       after
-        AppServer.stop_session(session)
+        CodexRuntime.stop_session(session)
       end
     end
   end
@@ -117,13 +122,19 @@ defmodule OrbitElixir.AgentRunner do
   defp do_run_codex_turns(app_session, provider, context, turn_number, max_turns) do
     prompt = build_turn_prompt(context.issue, context.opts, turn_number, max_turns, provider)
 
-    with {:ok, turn_session} <-
-           AppServer.run_turn(
+    with {:ok, turn} <-
+           CodexRuntime.send_turn(app_session, %{
+             prompt: prompt,
+             issue: context.issue
+           }),
+         {:ok, turn_summary} <-
+           CodexRuntime.stream_events(
              app_session,
-             prompt,
-             context.issue,
-             on_message: codex_message_handler(context.codex_update_recipient, context.issue)
+             turn,
+             codex_message_handler(context.codex_update_recipient, context.issue)
            ) do
+      turn_session = Map.get(turn_summary, :provider_result, %{})
+
       Logger.info("Completed agent run for #{issue_context(context.issue)} session_id=#{turn_session[:session_id]} workspace=#{context.workspace} turn=#{turn_number}/#{max_turns}")
 
       case continue_with_issue?(context.issue, context.issue_state_fetcher) do
