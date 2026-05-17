@@ -708,9 +708,13 @@ defmodule OrbitElixir.Orchestrator do
             worker_host: worker_host,
             workspace_path: nil,
             session_id: nil,
+            agent_provider: nil,
+            agent_harness: nil,
+            agent_model: nil,
             last_codex_message: nil,
             last_codex_timestamp: nil,
             last_codex_event: nil,
+            last_runtime_event: nil,
             codex_app_server_pid: nil,
             codex_input_tokens: 0,
             codex_output_tokens: 0,
@@ -1113,6 +1117,9 @@ defmodule OrbitElixir.Orchestrator do
           worker_host: Map.get(metadata, :worker_host),
           workspace_path: Map.get(metadata, :workspace_path),
           session_id: metadata.session_id,
+          agent_provider: Map.get(metadata, :agent_provider),
+          agent_harness: Map.get(metadata, :agent_harness),
+          agent_model: Map.get(metadata, :agent_model),
           codex_app_server_pid: metadata.codex_app_server_pid,
           codex_input_tokens: metadata.codex_input_tokens,
           codex_output_tokens: metadata.codex_output_tokens,
@@ -1122,6 +1129,7 @@ defmodule OrbitElixir.Orchestrator do
           last_codex_timestamp: metadata.last_codex_timestamp,
           last_codex_message: metadata.last_codex_message,
           last_codex_event: metadata.last_codex_event,
+          last_runtime_event: Map.get(metadata, :last_runtime_event),
           runtime_seconds: running_seconds(metadata.started_at, now)
         }
       end)
@@ -1185,7 +1193,11 @@ defmodule OrbitElixir.Orchestrator do
         last_codex_timestamp: timestamp,
         last_codex_message: summarize_codex_update(update),
         session_id: session_id_for_update(running_entry.session_id, update),
+        agent_provider: agent_provider_for_update(Map.get(running_entry, :agent_provider), update),
+        agent_harness: agent_harness_for_update(Map.get(running_entry, :agent_harness), update),
+        agent_model: agent_model_for_update(Map.get(running_entry, :agent_model), update),
         last_codex_event: event,
+        last_runtime_event: runtime_event_for_update(Map.get(running_entry, :last_runtime_event), update),
         codex_app_server_pid: codex_app_server_pid_for_update(codex_app_server_pid, update),
         codex_input_tokens: codex_input_tokens + token_delta.input_tokens,
         codex_output_tokens: codex_output_tokens + token_delta.output_tokens,
@@ -1215,7 +1227,49 @@ defmodule OrbitElixir.Orchestrator do
   defp session_id_for_update(_existing, %{session_id: session_id}) when is_binary(session_id),
     do: session_id
 
+  defp session_id_for_update(_existing, %{runtime_event: %{session_id: session_id}}) when is_binary(session_id),
+    do: session_id
+
   defp session_id_for_update(existing, _update), do: existing
+
+  defp agent_provider_for_update(existing, update) do
+    update_string_value(update, :agent_provider) || runtime_event_string_value(update, :provider) || existing
+  end
+
+  defp agent_harness_for_update(existing, update) do
+    update_string_value(update, :agent_harness) || runtime_event_string_value(update, :harness) || existing
+  end
+
+  defp agent_model_for_update(existing, update) do
+    update_string_value(update, :agent_model) || runtime_event_string_value(update, :model) || existing
+  end
+
+  defp runtime_event_for_update(_existing, %{runtime_event: runtime_event}) when is_map(runtime_event),
+    do: runtime_event
+
+  defp runtime_event_for_update(existing, _update), do: existing
+
+  defp update_string_value(update, key) do
+    case Map.get(update, key) || Map.get(update, Atom.to_string(key)) do
+      nil -> nil
+      value when is_binary(value) and value != "" -> value
+      value when is_atom(value) -> Atom.to_string(value)
+      value when is_integer(value) -> Integer.to_string(value)
+      _ -> nil
+    end
+  end
+
+  defp runtime_event_string_value(%{runtime_event: runtime_event}, key) when is_map(runtime_event) do
+    case Map.get(runtime_event, key) || Map.get(runtime_event, Atom.to_string(key)) do
+      nil -> nil
+      value when is_binary(value) and value != "" -> value
+      value when is_atom(value) -> Atom.to_string(value)
+      value when is_integer(value) -> Integer.to_string(value)
+      _ -> nil
+    end
+  end
+
+  defp runtime_event_string_value(_update, _key), do: nil
 
   defp turn_count_for_update(existing_count, existing_session_id, %{
          event: :session_started,
