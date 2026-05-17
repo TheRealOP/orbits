@@ -4,7 +4,7 @@ defmodule OrbitElixir.Codex.AppServer do
   """
 
   require Logger
-  alias OrbitElixir.{Codex.DynamicTool, Config, PathSafety, SSH}
+  alias OrbitElixir.{AgentRuntime, Codex.DynamicTool, Config, PathSafety, SSH}
 
   @initialize_id 1
   @thread_start_id 2
@@ -93,6 +93,7 @@ defmodule OrbitElixir.Codex.AppServer do
     case start_turn(port, thread_id, prompt, issue, workspace, approval_policy, turn_sandbox_policy) do
       {:ok, turn_id} ->
         session_id = "#{thread_id}-#{turn_id}"
+        runtime_metadata = Map.merge(metadata, %{session_id: session_id, thread_id: thread_id, turn_id: turn_id})
         Logger.info("Codex session started for #{issue_context(issue)} session_id=#{session_id}")
 
         emit_message(
@@ -106,7 +107,7 @@ defmodule OrbitElixir.Codex.AppServer do
           metadata
         )
 
-        case await_turn_completion(port, on_message, tool_executor, auto_approve_requests) do
+        case await_turn_completion(port, on_message, tool_executor, auto_approve_requests, runtime_metadata) do
           {:ok, result} ->
             Logger.info("Codex session completed for #{issue_context(issue)} session_id=#{session_id}")
 
@@ -128,7 +129,7 @@ defmodule OrbitElixir.Codex.AppServer do
                 session_id: session_id,
                 reason: reason
               },
-              metadata
+              runtime_metadata
             )
 
             {:error, reason}
@@ -334,32 +335,31 @@ defmodule OrbitElixir.Codex.AppServer do
     end
   end
 
-  defp await_turn_completion(port, on_message, tool_executor, auto_approve_requests) do
-    receive_loop(
-      port,
-      on_message,
-      Config.settings!().codex.turn_timeout_ms,
-      "",
-      tool_executor,
-      auto_approve_requests
-    )
+  defp await_turn_completion(port, on_message, tool_executor, auto_approve_requests, runtime_metadata) do
+    port
+    |> stream_context(on_message, tool_executor, auto_approve_requests, runtime_metadata)
+    |> receive_loop("")
   end
 
-  defp receive_loop(port, on_message, timeout_ms, pending_line, tool_executor, auto_approve_requests) do
+  defp stream_context(port, on_message, tool_executor, auto_approve_requests, runtime_metadata) do
+    %{
+      port: port,
+      on_message: on_message,
+      timeout_ms: Config.settings!().codex.turn_timeout_ms,
+      tool_executor: tool_executor,
+      auto_approve_requests: auto_approve_requests,
+      runtime_metadata: runtime_metadata
+    }
+  end
+
+  defp receive_loop(%{port: port, timeout_ms: timeout_ms} = stream, pending_line) do
     receive do
       {^port, {:data, {:eol, chunk}}} ->
         complete_line = pending_line <> to_string(chunk)
-        handle_incoming(port, on_message, complete_line, timeout_ms, tool_executor, auto_approve_requests)
+        handle_incoming(stream, complete_line)
 
       {^port, {:data, {:noeol, chunk}}} ->
-        receive_loop(
-          port,
-          on_message,
-          timeout_ms,
-          pending_line <> to_string(chunk),
-          tool_executor,
-          auto_approve_requests
-        )
+        receive_loop(stream, pending_line <> to_string(chunk))
 
       {^port, {:exit_status, status}} ->
         {:error, {:port_exit, status}}
@@ -369,12 +369,12 @@ defmodule OrbitElixir.Codex.AppServer do
     end
   end
 
-  defp handle_incoming(port, on_message, data, timeout_ms, tool_executor, auto_approve_requests) do
+  defp handle_incoming(%{on_message: on_message, runtime_metadata: runtime_metadata} = stream, data) do
     payload_string = to_string(data)
 
     case Jason.decode(payload_string) do
       {:ok, %{"method" => "turn/completed"} = payload} ->
-        emit_turn_event(on_message, :turn_completed, payload, payload_string, port, payload)
+        emit_turn_event(on_message, :turn_completed, payload, payload_string, runtime_metadata, payload)
         {:ok, :turn_completed}
 
       {:ok, %{"method" => "turn/failed", "params" => _} = payload} ->
@@ -383,7 +383,7 @@ defmodule OrbitElixir.Codex.AppServer do
           :turn_failed,
           payload,
           payload_string,
-          port,
+          runtime_metadata,
           Map.get(payload, "params")
         )
 
@@ -395,7 +395,7 @@ defmodule OrbitElixir.Codex.AppServer do
           :turn_cancelled,
           payload,
           payload_string,
-          port,
+          runtime_metadata,
           Map.get(payload, "params")
         )
 
@@ -403,16 +403,7 @@ defmodule OrbitElixir.Codex.AppServer do
 
       {:ok, %{"method" => method} = payload}
       when is_binary(method) ->
-        handle_turn_method(
-          port,
-          on_message,
-          payload,
-          payload_string,
-          method,
-          timeout_ms,
-          tool_executor,
-          auto_approve_requests
-        )
+        handle_turn_method(stream, payload, payload_string, method)
 
       {:ok, payload} ->
         emit_message(
@@ -422,10 +413,10 @@ defmodule OrbitElixir.Codex.AppServer do
             payload: payload,
             raw: payload_string
           },
-          metadata_from_message(port, payload)
+          metadata_from_message(runtime_metadata, payload)
         )
 
-        receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
+        receive_loop(stream, "")
 
       {:error, _reason} ->
         log_non_json_stream_line(payload_string, "turn stream")
@@ -438,15 +429,15 @@ defmodule OrbitElixir.Codex.AppServer do
               payload: payload_string,
               raw: payload_string
             },
-            metadata_from_message(port, %{raw: payload_string})
+            metadata_from_message(runtime_metadata, %{raw: payload_string})
           )
         end
 
-        receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
+        receive_loop(stream, "")
     end
   end
 
-  defp emit_turn_event(on_message, event, payload, payload_string, port, payload_details) do
+  defp emit_turn_event(on_message, event, payload, payload_string, runtime_metadata, payload_details) do
     emit_message(
       on_message,
       event,
@@ -455,21 +446,23 @@ defmodule OrbitElixir.Codex.AppServer do
         raw: payload_string,
         details: payload_details
       },
-      metadata_from_message(port, payload)
+      metadata_from_message(runtime_metadata, payload)
     )
   end
 
   defp handle_turn_method(
-         port,
-         on_message,
+         %{
+           port: port,
+           on_message: on_message,
+           tool_executor: tool_executor,
+           auto_approve_requests: auto_approve_requests,
+           runtime_metadata: runtime_metadata
+         } = stream,
          payload,
          payload_string,
-         method,
-         timeout_ms,
-         tool_executor,
-         auto_approve_requests
+         method
        ) do
-    metadata = metadata_from_message(port, payload)
+    metadata = metadata_from_message(runtime_metadata, payload)
 
     case maybe_handle_approval_request(
            port,
@@ -492,7 +485,7 @@ defmodule OrbitElixir.Codex.AppServer do
         {:error, {:turn_input_required, payload}}
 
       :approved ->
-        receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
+        receive_loop(stream, "")
 
       :approval_required ->
         emit_message(
@@ -526,7 +519,7 @@ defmodule OrbitElixir.Codex.AppServer do
           )
 
           Logger.debug("Codex notification: #{inspect(method)}")
-          receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
+          receive_loop(stream, "")
         end
     end
   end
@@ -1015,14 +1008,18 @@ defmodule OrbitElixir.Codex.AppServer do
   end
 
   defp emit_message(on_message, event, details, metadata) when is_function(on_message, 1) do
-    message = metadata |> Map.merge(details) |> Map.put(:event, event) |> Map.put(:timestamp, DateTime.utc_now())
+    message =
+      metadata
+      |> Map.merge(details)
+      |> Map.put(:event, event)
+      |> Map.put(:timestamp, DateTime.utc_now())
+      |> AgentRuntime.attach_runtime_event()
+
     on_message.(message)
   end
 
-  defp metadata_from_message(port, payload) do
-    port
-    |> port_metadata(nil, %{"name" => "codex", "harness" => "codex_app_server", "model" => nil})
-    |> maybe_set_usage(payload)
+  defp metadata_from_message(metadata, payload) when is_map(metadata) do
+    maybe_set_usage(metadata, payload)
   end
 
   defp maybe_set_usage(metadata, payload) when is_map(payload) do
