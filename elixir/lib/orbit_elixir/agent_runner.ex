@@ -4,8 +4,8 @@ defmodule OrbitElixir.AgentRunner do
   """
 
   require Logger
-  alias OrbitElixir.AgentHarness.CLI, as: AgentCLI
   alias OrbitElixir.AgentProvider
+  alias OrbitElixir.AgentRuntime.CLIAdapter, as: AgentCLI
   alias OrbitElixir.Codex.AppServer
   alias OrbitElixir.{Config, Linear.Issue, PromptBuilder, Tracker, Workspace}
 

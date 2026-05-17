@@ -350,6 +350,20 @@ defmodule OrbitElixir.ExtensionsTest do
                  "state" => "In Progress",
                  "worker_host" => nil,
                  "workspace_path" => nil,
+                 "provider" => %{"name" => "gemini", "harness" => "cli", "model" => "auto"},
+                 "runtime" => %{
+                   "session_id" => "thread-http",
+                   "turn_count" => 7,
+                   "last_event" => "notification",
+                   "last_event_at" => nil,
+                   "last_runtime_event" => %{
+                     "event" => "output_delta",
+                     "session_id" => "thread-http",
+                     "provider" => "gemini",
+                     "harness" => "cli",
+                     "payload" => %{"line" => "rendered"}
+                   }
+                 },
                  "session_id" => "thread-http",
                  "turn_count" => 7,
                  "last_event" => "notification",
@@ -394,6 +408,20 @@ defmodule OrbitElixir.ExtensionsTest do
              "running" => %{
                "worker_host" => nil,
                "workspace_path" => nil,
+               "provider" => %{"name" => "gemini", "harness" => "cli", "model" => "auto"},
+               "runtime" => %{
+                 "session_id" => "thread-http",
+                 "turn_count" => 7,
+                 "last_event" => "notification",
+                 "last_event_at" => nil,
+                 "last_runtime_event" => %{
+                   "event" => "output_delta",
+                   "session_id" => "thread-http",
+                   "provider" => "gemini",
+                   "harness" => "cli",
+                   "payload" => %{"line" => "rendered"}
+                 }
+               },
                "session_id" => "thread-http",
                "turn_count" => 7,
                "state" => "In Progress",
@@ -543,6 +571,7 @@ defmodule OrbitElixir.ExtensionsTest do
     assert html =~ "MT-HTTP"
     assert html =~ "MT-RETRY"
     assert html =~ "rendered"
+    assert html =~ "gemini / cli"
     assert html =~ "Runtime"
     assert html =~ "Live"
     assert html =~ "Offline"
@@ -692,10 +721,20 @@ defmodule OrbitElixir.ExtensionsTest do
           state: "In Progress",
           session_id: "thread-http",
           turn_count: 7,
+          agent_provider: "gemini",
+          agent_harness: "cli",
+          agent_model: "auto",
           codex_app_server_pid: nil,
           last_codex_message: "rendered",
           last_codex_timestamp: nil,
           last_codex_event: :notification,
+          last_runtime_event: %{
+            event: :output_delta,
+            session_id: "thread-http",
+            provider: "gemini",
+            harness: "cli",
+            payload: %{"line" => "rendered"}
+          },
           codex_input_tokens: 4,
           codex_output_tokens: 8,
           codex_total_tokens: 12,

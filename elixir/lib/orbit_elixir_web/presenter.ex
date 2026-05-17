@@ -102,6 +102,8 @@ defmodule OrbitElixirWeb.Presenter do
       state: entry.state,
       worker_host: Map.get(entry, :worker_host),
       workspace_path: Map.get(entry, :workspace_path),
+      provider: provider_payload(entry),
+      runtime: runtime_payload(entry),
       session_id: entry.session_id,
       turn_count: Map.get(entry, :turn_count, 0),
       last_event: entry.last_codex_event,
@@ -132,6 +134,8 @@ defmodule OrbitElixirWeb.Presenter do
     %{
       worker_host: Map.get(running, :worker_host),
       workspace_path: Map.get(running, :workspace_path),
+      provider: provider_payload(running),
+      runtime: runtime_payload(running),
       session_id: running.session_id,
       turn_count: Map.get(running, :turn_count, 0),
       state: running.state,
@@ -154,6 +158,24 @@ defmodule OrbitElixirWeb.Presenter do
       error: retry.error,
       worker_host: Map.get(retry, :worker_host),
       workspace_path: Map.get(retry, :workspace_path)
+    }
+  end
+
+  defp provider_payload(entry) do
+    %{
+      name: Map.get(entry, :agent_provider),
+      harness: Map.get(entry, :agent_harness),
+      model: Map.get(entry, :agent_model)
+    }
+  end
+
+  defp runtime_payload(entry) do
+    %{
+      session_id: Map.get(entry, :session_id),
+      turn_count: Map.get(entry, :turn_count, 0),
+      last_event: Map.get(entry, :last_codex_event),
+      last_event_at: iso8601(Map.get(entry, :last_codex_timestamp)),
+      last_runtime_event: json_safe(Map.get(entry, :last_runtime_event))
     }
   end
 
@@ -180,6 +202,20 @@ defmodule OrbitElixirWeb.Presenter do
 
   defp summarize_message(nil), do: nil
   defp summarize_message(message), do: StatusDashboard.humanize_codex_message(message)
+
+  defp json_safe(nil), do: nil
+  defp json_safe(%DateTime{} = datetime), do: iso8601(datetime)
+  defp json_safe(value) when is_binary(value) or is_number(value) or is_boolean(value), do: value
+  defp json_safe(value) when is_atom(value), do: Atom.to_string(value)
+  defp json_safe(value) when is_list(value), do: Enum.map(value, &json_safe/1)
+
+  defp json_safe(value) when is_tuple(value), do: inspect(value)
+
+  defp json_safe(%{} = value) do
+    Map.new(value, fn {key, map_value} -> {to_string(key), json_safe(map_value)} end)
+  end
+
+  defp json_safe(value), do: inspect(value)
 
   defp due_at_iso8601(due_in_ms) when is_integer(due_in_ms) do
     DateTime.utc_now()

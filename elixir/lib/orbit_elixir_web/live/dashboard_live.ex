@@ -153,6 +153,7 @@ defmodule OrbitElixirWeb.DashboardLive do
                     <td>
                       <div class="issue-stack">
                         <span class="issue-id"><%= entry.issue_identifier %></span>
+                        <span class="muted"><%= provider_label(entry.provider) %></span>
                         <a class="issue-link" href={"/api/v1/#{entry.issue_identifier}"}>JSON details</a>
                       </div>
                     </td>
@@ -320,6 +321,14 @@ defmodule OrbitElixirWeb.DashboardLive do
       true -> base
     end
   end
+
+  defp provider_label(%{name: name, harness: harness}) when is_binary(name) and name != "" do
+    [name, harness]
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+    |> Enum.join(" / ")
+  end
+
+  defp provider_label(_provider), do: "provider n/a"
 
   defp schedule_runtime_tick do
     Process.send_after(self(), :runtime_tick, @runtime_tick_ms)
