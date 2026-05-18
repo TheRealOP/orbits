@@ -13,6 +13,10 @@ defmodule OrbitElixir.AgentProviderTest do
     assert {:ok, provider, reason} = AgentProvider.select(issue)
     assert provider["name"] == "gemini"
     assert provider["harness"] == "cli"
+    assert provider["command"] =~ "--prompt \"$ORBIT_AGENT_PROMPT\""
+    assert provider["command"] =~ "--output-format json"
+    assert provider["command"] =~ "--approval-mode=yolo"
+    assert provider["output_format"] == "json"
     assert reason =~ "gemini"
   end
 

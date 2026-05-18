@@ -958,7 +958,10 @@ Each normalized event SHOULD include:
 This contract intentionally does not require Claude, Gemini, or other CLI providers to mimic
 Codex's app-server thread/turn protocol. A CLI invocation can be represented as a short-lived
 session with stdout/stderr lines as `output_delta` events and process status as `turn_completed` or
-`turn_failed`.
+`turn_failed`. Gemini is currently integrated through the Gemini CLI headless path rather than a
+Gemini SDK/server adapter; when configured for JSON output, Orbit may parse provider results,
+surface structured provider errors, enforce the configured turn timeout, and emit `diff_changed`
+events from the workspace diff after the process exits.
 
 ### 10.2 Codex App-Server Implementation Notes
 

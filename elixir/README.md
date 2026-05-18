@@ -108,8 +108,9 @@ providers:
     model: sonnet
   gemini:
     harness: cli
-    command: gemini --approval-mode=auto_edit --model "$ORBIT_AGENT_MODEL" -p "$ORBIT_AGENT_PROMPT"
+    command: gemini --skip-trust --approval-mode=yolo --model "$ORBIT_AGENT_MODEL" --prompt "$ORBIT_AGENT_PROMPT" --output-format json
     model: auto
+    output_format: json
 ---
 
 You are working on a Linear issue {{ issue.identifier }}.
@@ -136,6 +137,11 @@ Notes:
 - `agent.provider_routes` can add ordered route rules with `provider`, `labels`, and `keywords`.
   Built-in routes send UI/UX, frontend, layout, visual, and accessibility tasks to Gemini, send
   analysis/docs/research/review tasks to Claude, and fall back to Codex.
+- Gemini is currently backed by the Gemini CLI in headless mode, not a Gemini SDK or long-running
+  server. The built-in provider uses `--prompt`, `--output-format json`, `--skip-trust`, and
+  `--approval-mode=yolo` so Orbit can run it non-interactively and parse structured completion,
+  error, timeout, and diff reporting. Keep custom Gemini commands JSON-producing if you want the
+  normalized result extraction.
 - CLI providers receive `ORBIT_AGENT_PROMPT`, `ORBIT_AGENT_PROVIDER`,
   `ORBIT_AGENT_MODEL`, and `ORBIT_ISSUE_IDENTIFIER` in their environment.
 - If the Markdown body is blank, Orbit uses a default prompt template that includes the issue
