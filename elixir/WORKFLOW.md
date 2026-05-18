@@ -37,7 +37,7 @@ codex:
     type: workspaceWrite
 providers:
   claude:
-    harness: cli
+    harness: claude_agent_sdk
     command: claude -p --permission-mode acceptEdits --model "$ORBIT_AGENT_MODEL" "$ORBIT_AGENT_PROMPT"
     model: sonnet
   gemini:

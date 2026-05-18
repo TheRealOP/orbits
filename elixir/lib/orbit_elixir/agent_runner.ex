@@ -5,6 +5,7 @@ defmodule OrbitElixir.AgentRunner do
 
   require Logger
   alias OrbitElixir.AgentProvider
+  alias OrbitElixir.AgentRuntime.ClaudeAgentSDK, as: ClaudeRuntime
   alias OrbitElixir.AgentRuntime.CLIAdapter, as: AgentCLI
   alias OrbitElixir.AgentRuntime.CodexAppServer, as: CodexRuntime
   alias OrbitElixir.{Config, Linear.Issue, PromptBuilder, Tracker, Workspace}
@@ -88,6 +89,9 @@ defmodule OrbitElixir.AgentRunner do
 
         "cli" ->
           run_cli_turns(provider, workspace, issue, codex_update_recipient, opts, worker_host)
+
+        "claude_agent_sdk" ->
+          run_claude_sdk_turns(provider, workspace, issue, codex_update_recipient, opts, worker_host)
 
         harness ->
           {:error, {:unsupported_agent_harness, harness}}
@@ -210,6 +214,99 @@ defmodule OrbitElixir.AgentRunner do
           {:error, reason}
       end
     end
+  end
+
+  defp run_claude_sdk_turns(provider, workspace, issue, codex_update_recipient, opts, worker_host) do
+    max_turns = Keyword.get(opts, :max_turns, Config.settings!().agent.max_turns)
+    issue_state_fetcher = Keyword.get(opts, :issue_state_fetcher, &Tracker.fetch_issue_states_by_ids/1)
+    context = turn_context(workspace, issue, codex_update_recipient, opts, issue_state_fetcher, worker_host)
+
+    case ClaudeRuntime.start_session(%{
+           workspace: workspace,
+           provider: provider["name"],
+           harness: provider["harness"],
+           model: provider["model"],
+           config: %{
+             provider: provider,
+             worker_host: worker_host
+           }
+         }) do
+      {:ok, session} ->
+        try do
+          do_run_claude_sdk_turns(session, provider, context, 1, max_turns)
+        after
+          ClaudeRuntime.stop_session(session)
+        end
+
+      {:error, reason} ->
+        fallback_to_cli(provider, context, max_turns, {:start_session, reason})
+    end
+  end
+
+  defp do_run_claude_sdk_turns(session, provider, context, turn_number, max_turns) do
+    prompt = build_turn_prompt(context.issue, context.opts, turn_number, max_turns, provider)
+
+    with {:ok, turn} <-
+           ClaudeRuntime.send_turn(session, %{
+             prompt: prompt,
+             issue: context.issue
+           }),
+         {:ok, turn_summary} <-
+           ClaudeRuntime.stream_events(
+             session,
+             turn,
+             codex_message_handler(context.codex_update_recipient, context.issue)
+           ) do
+      turn_session = Map.get(turn_summary, :provider_result, %{})
+      session_id = turn_session["session_id"] || turn_session[:session_id] || session.session_id
+
+      Logger.info(
+        "Completed agent run for #{issue_context(context.issue)} session_id=#{session_id} workspace=#{context.workspace} provider=#{provider["name"]} harness=#{provider["harness"]} turn=#{turn_number}/#{max_turns}"
+      )
+
+      case continue_with_issue?(context.issue, context.issue_state_fetcher) do
+        {:continue, refreshed_issue} when turn_number < max_turns ->
+          Logger.info(
+            "Continuing agent run for #{issue_context(refreshed_issue)} after normal turn completion provider=#{provider["name"]} harness=#{provider["harness"]} turn=#{turn_number}/#{max_turns}"
+          )
+
+          do_run_claude_sdk_turns(
+            session,
+            provider,
+            %{context | issue: refreshed_issue},
+            turn_number + 1,
+            max_turns
+          )
+
+        {:continue, refreshed_issue} ->
+          Logger.info("Reached agent.max_turns for #{issue_context(refreshed_issue)} with issue still active; returning control to orchestrator")
+
+          :ok
+
+        {:done, _refreshed_issue} ->
+          :ok
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      {:error, {:turn_cancelled, _details} = reason} ->
+        {:error, reason}
+
+      {:error, :turn_cancelled = reason} ->
+        {:error, reason}
+
+      {:error, reason} ->
+        fallback_to_cli(provider, context, max_turns, {:sdk_turn, reason}, turn_number)
+    end
+  end
+
+  defp fallback_to_cli(provider, context, max_turns, sdk_reason, turn_number \\ 1) do
+    cli_provider = Map.put(provider, "harness", "cli")
+
+    Logger.warning("Falling back to Claude CLI provider for #{issue_context(context.issue)} reason=#{inspect(sdk_reason)}")
+
+    do_run_cli_turns(cli_provider, context, turn_number, max_turns)
   end
 
   defp build_turn_prompt(issue, opts, 1, _max_turns, _provider), do: PromptBuilder.build_prompt(issue, opts)

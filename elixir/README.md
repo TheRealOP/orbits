@@ -103,7 +103,7 @@ codex:
   command: codex app-server
 providers:
   claude:
-    harness: cli
+    harness: claude_agent_sdk
     command: claude -p --permission-mode acceptEdits --model "$ORBIT_AGENT_MODEL" "$ORBIT_AGENT_PROMPT"
     model: sonnet
   gemini:
@@ -133,10 +133,15 @@ Notes:
 - `agent.max_turns` caps how many back-to-back agent turns Orbit will run in a single agent
   invocation when a turn completes normally but the issue is still in an active state. Default: `20`.
 - `agent.default_provider` defaults to `codex`. Built-in providers are `codex`, `claude`, and
-  `gemini`; add custom entries under `providers` for additional CLI-based harnesses.
+  `gemini`; add custom entries under `providers` for additional CLI-based harnesses. Claude uses
+  the `claude_agent_sdk` harness by default and keeps `command` as its CLI fallback.
 - `agent.provider_routes` can add ordered route rules with `provider`, `labels`, and `keywords`.
   Built-in routes send UI/UX, frontend, layout, visual, and accessibility tasks to Gemini, send
   analysis/docs/research/review tasks to Claude, and fall back to Codex.
+- Claude Agent SDK support uses the TypeScript `@anthropic-ai/claude-agent-sdk` bridge in
+  `priv/claude_agent_sdk`. Install that package in the bridge directory before selecting the SDK
+  harness on a worker, or set `providers.claude.sdk_command` to an alternate Node command that
+  streams the same bridge frames.
 - Gemini is currently backed by the Gemini CLI in headless mode, not a Gemini SDK or long-running
   server. The built-in provider uses `--prompt`, `--output-format json`, `--skip-trust`, and
   `--approval-mode=yolo` so Orbit can run it non-interactively and parse structured completion,
