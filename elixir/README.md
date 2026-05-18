@@ -53,6 +53,89 @@ mise install
 mise exec -- elixir --version
 ```
 
+## Provider Runtime Setup
+
+Orbit starts one agent provider inside each issue workspace. The worker host that runs Orbit, or
+each SSH worker host configured under `worker.ssh_hosts`, must have the selected provider tools
+installed and authenticated before you start `./bin/orbit`.
+
+Codex app-server remains the default runtime. Claude Agent SDK is the preferred long-term Claude
+runtime, with the Claude CLI command kept as its fallback. Gemini is currently backed by the Gemini
+CLI in headless mode, not by a Gemini SDK or long-running server.
+
+Required local setup:
+
+- Set `LINEAR_API_KEY` to a Linear personal API key before starting Orbit. `tracker.api_key`
+  defaults to that environment variable when omitted or set to `$LINEAR_API_KEY`.
+- Install `bash` and `git` on every worker. Provider commands are launched through `bash -lc` in
+  the issue workspace, and local diff reporting uses `git diff`.
+- Install and authenticate every provider that routing can select on the workers that may receive
+  those issues. A missing provider executable or missing provider auth fails the agent turn.
+- If you use SSH workers, make sure each remote host has the same provider tools, credentials,
+  repository access, and workspace paths expected by your hooks.
+
+Provider modes:
+
+- `codex` uses the `codex_app_server` harness and `codex.command`, which defaults to
+  `codex app-server`. Install a Codex CLI version that supports app-server mode and authenticate
+  Codex on every worker that can run Codex issues. Codex receives Orbit's client-side
+  `linear_graphql` dynamic tool during app-server sessions. Codex approval and sandbox values are
+  passed through from `codex.approval_policy`, `codex.thread_sandbox`, and
+  `codex.turn_sandbox_policy`, so compatibility depends on the installed Codex app-server schema.
+- `claude` uses the `claude_agent_sdk` harness by default. The SDK adapter runs the Node bridge at
+  `priv/claude_agent_sdk/bridge.mjs` unless `providers.claude.sdk_command` points to another
+  compatible bridge command. Install Node.js and the bridge dependency before selecting this
+  harness:
+
+  ```bash
+  cd elixir/priv/claude_agent_sdk
+  npm install
+  ```
+
+  Claude workers also need usable Claude auth, such as `ANTHROPIC_API_KEY`, supported cloud-provider
+  credentials, or a preseeded Claude configuration that the SDK can read. The provider can set
+  `permission_mode`, `allowed_tools`, `disallowed_tools`, `setting_sources`,
+  `path_to_claude_code_executable`, and `env` for the SDK request. If the SDK session fails to
+  start, or a non-cancelled SDK turn fails, Orbit falls back to the same provider's `command` with
+  the generic CLI harness, so install and authenticate the `claude` CLI if you want that fallback.
+  The SDK harness currently runs only on local workers; remote SSH Claude SDK sessions are rejected.
+- `gemini` uses the generic `cli` harness. The built-in command runs Gemini headlessly with
+  `--prompt "$ORBIT_AGENT_PROMPT"`, `--output-format json`, `--skip-trust`, and
+  `--approval-mode=yolo`. Install and authenticate the Gemini CLI according to the auth mode you
+  use for that CLI. Keep Gemini commands non-interactive and JSON-producing if you want Orbit to
+  parse structured completion, error, timeout, and usage information. Gemini is one-shot
+  CLI/headless-backed for now; there is no Gemini SDK or app-server adapter in Orbit yet.
+- Custom CLI providers use `harness: cli` and a shell `command`. Orbit injects
+  `ORBIT_AGENT_PROMPT`, `ORBIT_AGENT_PROVIDER`, `ORBIT_AGENT_HARNESS`, `ORBIT_AGENT_MODEL`, and
+  `ORBIT_ISSUE_IDENTIFIER` into the provider process environment. Set `output_format: json` or
+  `output_format: stream-json` when the command emits structured output that Orbit should parse.
+
+Known limitations:
+
+- Codex is the only built-in provider that currently receives Orbit's app-server dynamic
+  `linear_graphql` tool. SDK and CLI providers must rely on their own installed tools, MCP setup,
+  provider capabilities, or the workflow prompt.
+- CLI providers are short-lived command invocations. They do not expose Codex-style live
+  thread/turn protocol semantics, and any command that waits for interactive input can stall until
+  `timeout_ms`.
+- Remote CLI and Codex sessions can run over SSH, but runtime diff extraction is local-only today
+  for the generic CLI adapter. Claude SDK remote execution is not supported yet.
+
+Choosing defaults and routes:
+
+- Keep `agent.default_provider: codex` unless every worker has another provider installed,
+  authenticated, and validated for unattended execution. This is the current default and safest
+  baseline because Codex app-server is the most complete Orbit integration.
+- Use `agent.provider_routes` for work that benefits from a specialized provider. Routes are
+  ordered and match by normalized Linear labels or keywords in the issue title/body. Your configured
+  routes run before Orbit's built-in routes.
+- Built-in routes send UI/UX, frontend, layout, visual, and accessibility work to Gemini; send
+  analysis, documentation, research, review, and strategy work to Claude; and otherwise fall back to
+  Codex.
+- Every route's `provider` must name a built-in provider or a configured entry under `providers`.
+  If a provider lacks required local tools or credentials, remove that route or keep Codex as the
+  default until the worker image is ready.
+
 ## Run
 
 ```bash
