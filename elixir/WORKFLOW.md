@@ -28,19 +28,33 @@ hooks:
 agent:
   max_concurrent_agents: 10
   max_turns: 20
+  # Codex app-server remains the default provider. Keep this unless every worker that can receive
+  # routed work has the alternate provider installed, authenticated, and validated for unattended use.
   default_provider: codex
+  # Custom routes are evaluated before Orbit's built-in routes. Built-in routes send UI/UX and
+  # frontend work to Gemini, analysis/docs/research/review work to Claude, and all other work to
+  # Codex. Route providers must exist in the built-ins or under `providers`.
 codex:
+  # Codex mode launches this app-server command in each issue workspace through bash.
+  # The Codex CLI must be installed and authenticated on the local worker or SSH worker host.
   command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
+  # Codex approval and sandbox settings are passed through to the installed Codex app-server schema.
   approval_policy: never
   thread_sandbox: workspace-write
   turn_sandbox_policy:
     type: workspaceWrite
 providers:
   claude:
+    # Claude Agent SDK is the preferred long-term Claude runtime. Install Node.js and run
+    # `npm install` in elixir/priv/claude_agent_sdk, then authenticate Claude/Anthropic on each
+    # worker. `command` is the CLI fallback used when the SDK cannot start or a non-cancelled SDK
+    # turn fails. Remote SSH Claude SDK sessions are not supported yet.
     harness: claude_agent_sdk
     command: claude -p --permission-mode acceptEdits --model "$ORBIT_AGENT_MODEL" "$ORBIT_AGENT_PROMPT"
     model: sonnet
   gemini:
+    # Gemini is CLI/headless-backed for now, not SDK/server-backed. Keep the command
+    # non-interactive and JSON-producing so Orbit can parse completion and error details.
     harness: cli
     command: gemini --skip-trust --approval-mode=yolo --model "$ORBIT_AGENT_MODEL" --prompt "$ORBIT_AGENT_PROMPT" --output-format json
     model: auto
