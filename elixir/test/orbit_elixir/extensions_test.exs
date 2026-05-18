@@ -350,12 +350,24 @@ defmodule OrbitElixir.ExtensionsTest do
                  "state" => "In Progress",
                  "worker_host" => nil,
                  "workspace_path" => nil,
-                 "provider" => %{"name" => "gemini", "harness" => "cli", "model" => "auto"},
+                 "provider_name" => "gemini",
+                 "adapter_type" => "cli",
+                 "provider" => %{
+                   "name" => "gemini",
+                   "provider_name" => "gemini",
+                   "harness" => "cli",
+                   "adapter_type" => "cli",
+                   "model" => "auto"
+                 },
                  "runtime" => %{
                    "session_id" => "thread-http",
                    "turn_count" => 7,
                    "last_event" => "notification",
                    "last_event_at" => nil,
+                   "latest_event" => "output_delta",
+                   "latest_message" => "rendered",
+                   "error_state" => "ok",
+                   "error_message" => nil,
                    "last_runtime_event" => %{
                      "event" => "output_delta",
                      "session_id" => "thread-http",
@@ -364,10 +376,24 @@ defmodule OrbitElixir.ExtensionsTest do
                      "payload" => %{"line" => "rendered"}
                    }
                  },
+                 "runtime_status" => %{
+                   "provider_name" => "gemini",
+                   "adapter_type" => "cli",
+                   "session_id" => "thread-http",
+                   "workspace_path" => Path.join(Config.settings!().workspace.root, "MT-HTTP"),
+                   "latest_event" => "output_delta",
+                   "latest_message" => "rendered",
+                   "error_state" => "ok",
+                   "error_message" => nil
+                 },
                  "session_id" => "thread-http",
                  "turn_count" => 7,
                  "last_event" => "notification",
                  "last_message" => "rendered",
+                 "latest_event" => "output_delta",
+                 "latest_message" => "rendered",
+                 "error_state" => "ok",
+                 "error_message" => nil,
                  "started_at" => state_payload["running"] |> List.first() |> Map.fetch!("started_at"),
                  "last_event_at" => nil,
                  "tokens" => %{"input_tokens" => 4, "output_tokens" => 8, "total_tokens" => 12}
@@ -408,12 +434,24 @@ defmodule OrbitElixir.ExtensionsTest do
              "running" => %{
                "worker_host" => nil,
                "workspace_path" => nil,
-               "provider" => %{"name" => "gemini", "harness" => "cli", "model" => "auto"},
+               "provider_name" => "gemini",
+               "adapter_type" => "cli",
+               "provider" => %{
+                 "name" => "gemini",
+                 "provider_name" => "gemini",
+                 "harness" => "cli",
+                 "adapter_type" => "cli",
+                 "model" => "auto"
+               },
                "runtime" => %{
                  "session_id" => "thread-http",
                  "turn_count" => 7,
                  "last_event" => "notification",
                  "last_event_at" => nil,
+                 "latest_event" => "output_delta",
+                 "latest_message" => "rendered",
+                 "error_state" => "ok",
+                 "error_message" => nil,
                  "last_runtime_event" => %{
                    "event" => "output_delta",
                    "session_id" => "thread-http",
@@ -422,12 +460,26 @@ defmodule OrbitElixir.ExtensionsTest do
                    "payload" => %{"line" => "rendered"}
                  }
                },
+               "runtime_status" => %{
+                 "provider_name" => "gemini",
+                 "adapter_type" => "cli",
+                 "session_id" => "thread-http",
+                 "workspace_path" => Path.join(Config.settings!().workspace.root, "MT-HTTP"),
+                 "latest_event" => "output_delta",
+                 "latest_message" => "rendered",
+                 "error_state" => "ok",
+                 "error_message" => nil
+               },
                "session_id" => "thread-http",
                "turn_count" => 7,
                "state" => "In Progress",
                "started_at" => issue_payload["running"]["started_at"],
                "last_event" => "notification",
                "last_message" => "rendered",
+               "latest_event" => "output_delta",
+               "latest_message" => "rendered",
+               "error_state" => "ok",
+               "error_message" => nil,
                "last_event_at" => nil,
                "tokens" => %{"input_tokens" => 4, "output_tokens" => 8, "total_tokens" => 12}
              },
@@ -453,6 +505,110 @@ defmodule OrbitElixir.ExtensionsTest do
 
     assert %{"queued" => true, "coalesced" => false, "operations" => ["poll", "reconcile"]} =
              json_response(conn, 202)
+  end
+
+  test "presenter exposes provider-neutral runtime status for all built-in providers" do
+    orchestrator_name = Module.concat(__MODULE__, :ProviderRuntimeStatusOrchestrator)
+
+    snapshot = %{
+      running: [
+        provider_runtime_entry(%{
+          issue_id: "issue-codex",
+          identifier: "MT-CODEX",
+          session_id: "codex-thread-turn",
+          agent_provider: "codex",
+          agent_harness: "codex_app_server",
+          workspace_path: "/workspaces/MT-CODEX",
+          last_codex_event: :turn_completed,
+          last_runtime_event: %{
+            event: :turn_completed,
+            session_id: "codex-thread-turn",
+            provider: "codex",
+            harness: "codex_app_server",
+            payload: %{}
+          },
+          codex_input_tokens: 11,
+          codex_output_tokens: 7,
+          codex_total_tokens: 18
+        }),
+        provider_runtime_entry(%{
+          issue_id: "issue-claude",
+          identifier: "MT-CLAUDE",
+          session_id: "claude-sdk-session",
+          agent_provider: "claude",
+          agent_harness: "claude_agent_sdk",
+          workspace_path: "/workspaces/MT-CLAUDE",
+          last_codex_event: :turn_ended_with_error,
+          last_runtime_event: %{
+            event: :turn_failed,
+            session_id: "claude-sdk-session",
+            provider: "claude",
+            harness: "claude_agent_sdk",
+            payload: %{"reason" => "quota exceeded", "type" => "failure"}
+          }
+        }),
+        provider_runtime_entry(%{
+          issue_id: "issue-gemini",
+          identifier: "MT-GEMINI",
+          session_id: "gemini-cli-session",
+          agent_provider: "gemini",
+          agent_harness: "cli",
+          workspace_path: "/workspaces/MT-GEMINI",
+          last_codex_event: :notification,
+          last_runtime_event: %{
+            event: :output_delta,
+            session_id: "gemini-cli-session",
+            provider: "gemini",
+            harness: "cli",
+            payload: %{"line" => "gemini is working"}
+          }
+        })
+      ],
+      retrying: [],
+      codex_totals: %{input_tokens: 11, output_tokens: 7, total_tokens: 18, seconds_running: 0},
+      rate_limits: nil
+    }
+
+    start_supervised!({StaticOrchestrator, name: orchestrator_name, snapshot: snapshot})
+
+    payload = OrbitElixirWeb.Presenter.state_payload(orchestrator_name, 50)
+    statuses = Map.new(payload.running, &{&1.issue_identifier, &1.runtime_status})
+
+    assert statuses["MT-CODEX"] == %{
+             provider_name: "codex",
+             adapter_type: "codex_app_server",
+             session_id: "codex-thread-turn",
+             workspace_path: "/workspaces/MT-CODEX",
+             latest_event: "turn_completed",
+             latest_message: "turn completed",
+             error_state: "ok",
+             error_message: nil
+           }
+
+    assert statuses["MT-CLAUDE"] == %{
+             provider_name: "claude",
+             adapter_type: "claude_agent_sdk",
+             session_id: "claude-sdk-session",
+             workspace_path: "/workspaces/MT-CLAUDE",
+             latest_event: "turn_failed",
+             latest_message: "quota exceeded",
+             error_state: "error",
+             error_message: "quota exceeded"
+           }
+
+    assert statuses["MT-GEMINI"] == %{
+             provider_name: "gemini",
+             adapter_type: "cli",
+             session_id: "gemini-cli-session",
+             workspace_path: "/workspaces/MT-GEMINI",
+             latest_event: "output_delta",
+             latest_message: "gemini is working",
+             error_state: "ok",
+             error_message: nil
+           }
+
+    assert codex = Enum.find(payload.running, &(&1.issue_identifier == "MT-CODEX"))
+    assert codex.tokens == %{input_tokens: 11, output_tokens: 7, total_tokens: 18}
   end
 
   test "phoenix observability api preserves 405, 404, and unavailable behavior" do
@@ -571,12 +727,16 @@ defmodule OrbitElixir.ExtensionsTest do
     assert html =~ "MT-HTTP"
     assert html =~ "MT-RETRY"
     assert html =~ "rendered"
-    assert html =~ "gemini / cli"
+    assert html =~ "gemini"
+    assert html =~ "cli"
+    assert html =~ Path.join(Config.settings!().workspace.root, "MT-HTTP")
     assert html =~ "Runtime"
     assert html =~ "Live"
     assert html =~ "Offline"
     assert html =~ "Copy ID"
-    assert html =~ "Codex update"
+    assert html =~ "Latest activity"
+    assert html =~ "Error state"
+    refute html =~ "Codex update"
     refute html =~ "data-runtime-clock="
     refute html =~ "setInterval(refreshRuntimeClocks"
     refute html =~ "Refresh now"
@@ -753,6 +913,33 @@ defmodule OrbitElixir.ExtensionsTest do
       codex_totals: %{input_tokens: 4, output_tokens: 8, total_tokens: 12, seconds_running: 42.5},
       rate_limits: %{"primary" => %{"remaining" => 11}}
     }
+  end
+
+  defp provider_runtime_entry(overrides) do
+    Map.merge(
+      %{
+        issue_id: "issue-runtime",
+        identifier: "MT-RUNTIME",
+        state: "In Progress",
+        session_id: "runtime-session",
+        turn_count: 1,
+        agent_provider: "codex",
+        agent_harness: "codex_app_server",
+        agent_model: nil,
+        codex_app_server_pid: nil,
+        worker_host: nil,
+        workspace_path: nil,
+        last_codex_message: nil,
+        last_codex_timestamp: nil,
+        last_codex_event: nil,
+        last_runtime_event: nil,
+        codex_input_tokens: 0,
+        codex_output_tokens: 0,
+        codex_total_tokens: 0,
+        started_at: DateTime.utc_now()
+      },
+      overrides
+    )
   end
 
   defp wait_for_bound_port do
