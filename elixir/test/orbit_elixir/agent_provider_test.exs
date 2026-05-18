@@ -27,7 +27,7 @@ defmodule OrbitElixir.AgentProviderTest do
 
     assert {:ok, provider, reason} = AgentProvider.select(issue)
     assert provider["name"] == "claude"
-    assert provider["harness"] == "cli"
+    assert provider["harness"] == "claude_agent_sdk"
     assert reason =~ "claude"
   end
 

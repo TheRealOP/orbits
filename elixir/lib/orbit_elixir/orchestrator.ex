@@ -7,7 +7,7 @@ defmodule OrbitElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias OrbitElixir.{AgentRunner, Config, StatusDashboard, Tracker, Workspace}
+  alias OrbitElixir.{AgentRunner, AgentRuntime, Config, StatusDashboard, Tracker, Workspace}
   alias OrbitElixir.Linear.Issue
 
   @continuation_retry_delay_ms 1_000
@@ -715,6 +715,7 @@ defmodule OrbitElixir.Orchestrator do
             last_codex_timestamp: nil,
             last_codex_event: nil,
             last_runtime_event: nil,
+            last_turn_id: nil,
             codex_app_server_pid: nil,
             codex_input_tokens: 0,
             codex_output_tokens: 0,
@@ -1205,7 +1206,8 @@ defmodule OrbitElixir.Orchestrator do
         codex_last_reported_input_tokens: max(last_reported_input, token_delta.input_reported),
         codex_last_reported_output_tokens: max(last_reported_output, token_delta.output_reported),
         codex_last_reported_total_tokens: max(last_reported_total, token_delta.total_reported),
-        turn_count: turn_count_for_update(turn_count, running_entry.session_id, update)
+        turn_count: turn_count_for_update(turn_count, running_entry, update),
+        last_turn_id: turn_id_for_update(Map.get(running_entry, :last_turn_id), update)
       }),
       token_delta
     }
@@ -1233,19 +1235,29 @@ defmodule OrbitElixir.Orchestrator do
   defp session_id_for_update(existing, _update), do: existing
 
   defp agent_provider_for_update(existing, update) do
-    update_string_value(update, :agent_provider) || runtime_event_string_value(update, :provider) || existing
+    update_string_value(update, :agent_provider) || update_string_value(update, :provider) ||
+      runtime_event_string_value(update, :provider) || existing
   end
 
   defp agent_harness_for_update(existing, update) do
-    update_string_value(update, :agent_harness) || runtime_event_string_value(update, :harness) || existing
+    update_string_value(update, :agent_harness) || update_string_value(update, :harness) ||
+      runtime_event_string_value(update, :harness) || existing
   end
 
   defp agent_model_for_update(existing, update) do
-    update_string_value(update, :agent_model) || runtime_event_string_value(update, :model) || existing
+    update_string_value(update, :agent_model) || update_string_value(update, :model) ||
+      runtime_event_string_value(update, :model) || existing
   end
 
   defp runtime_event_for_update(_existing, %{runtime_event: runtime_event}) when is_map(runtime_event),
     do: runtime_event
+
+  defp runtime_event_for_update(existing, update) when is_map(update) do
+    case AgentRuntime.validate_event(update) do
+      :ok -> update
+      {:error, _reason} -> existing
+    end
+  end
 
   defp runtime_event_for_update(existing, _update), do: existing
 
@@ -1271,23 +1283,46 @@ defmodule OrbitElixir.Orchestrator do
 
   defp runtime_event_string_value(_update, _key), do: nil
 
-  defp turn_count_for_update(existing_count, existing_session_id, %{
-         event: :session_started,
-         session_id: session_id
-       })
-       when is_integer(existing_count) and is_binary(session_id) do
-    if session_id == existing_session_id do
-      existing_count
-    else
-      existing_count + 1
+  defp turn_id_from_update(%{turn_id: turn_id}) when is_binary(turn_id), do: turn_id
+
+  defp turn_id_from_update(%{runtime_event: %{turn_id: turn_id}}) when is_binary(turn_id),
+    do: turn_id
+
+  defp turn_id_from_update(_update), do: nil
+
+  defp turn_id_for_update(existing, update), do: turn_id_from_update(update) || existing
+
+  defp turn_count_for_update(existing_count, running_entry, update)
+       when is_integer(existing_count) and is_map(running_entry) and is_map(update) do
+    existing_turn_id = Map.get(running_entry, :last_turn_id)
+    turn_id = turn_id_from_update(update)
+
+    cond do
+      is_binary(turn_id) and turn_id != existing_turn_id ->
+        existing_count + 1
+
+      is_nil(turn_id) and new_session_started?(running_entry, update) ->
+        existing_count + 1
+
+      true ->
+        existing_count
     end
   end
 
-  defp turn_count_for_update(existing_count, _existing_session_id, _update)
+  defp turn_count_for_update(existing_count, _running_entry, _update)
        when is_integer(existing_count),
        do: existing_count
 
-  defp turn_count_for_update(_existing_count, _existing_session_id, _update), do: 0
+  defp turn_count_for_update(_existing_count, _running_entry, _update), do: 0
+
+  defp new_session_started?(running_entry, %{event: :session_started} = update) do
+    existing_session_id = Map.get(running_entry, :session_id)
+    session_id = session_id_for_update(existing_session_id, update)
+
+    is_binary(session_id) and session_id != existing_session_id
+  end
+
+  defp new_session_started?(_running_entry, _update), do: false
 
   defp summarize_codex_update(update) do
     %{

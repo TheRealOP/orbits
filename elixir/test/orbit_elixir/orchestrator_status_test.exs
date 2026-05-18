@@ -116,6 +116,130 @@ defmodule OrbitElixir.OrchestratorStatusTest do
            }
   end
 
+  test "orchestrator snapshot reflects direct Claude SDK runtime events" do
+    issue_id = "issue-claude-sdk-snapshot"
+
+    issue = %Issue{
+      id: issue_id,
+      identifier: "MT-CLAUDE",
+      title: "Claude snapshot test",
+      description: "Capture Claude SDK state",
+      state: "In Progress",
+      url: "https://example.org/issues/MT-CLAUDE"
+    }
+
+    orchestrator_name = Module.concat(__MODULE__, :ClaudeSdkSnapshotOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    initial_state = :sys.get_state(pid)
+    started_at = DateTime.utc_now()
+
+    running_entry = %{
+      pid: self(),
+      ref: make_ref(),
+      identifier: issue.identifier,
+      issue: issue,
+      session_id: nil,
+      turn_count: 0,
+      last_turn_id: nil,
+      last_codex_message: nil,
+      last_codex_timestamp: nil,
+      last_codex_event: nil,
+      last_runtime_event: nil,
+      started_at: started_at
+    }
+
+    state_with_issue =
+      initial_state
+      |> Map.put(:running, %{issue_id => running_entry})
+      |> Map.put(:claimed, MapSet.put(initial_state.claimed, issue_id))
+
+    :sys.replace_state(pid, fn _ -> state_with_issue end)
+
+    now = DateTime.utc_now()
+
+    send(
+      pid,
+      {:codex_worker_update, issue_id,
+       %{
+         event: :turn_started,
+         session_id: "claude-sdk-synthetic",
+         turn_id: "claude-turn-1",
+         timestamp: now,
+         provider: "claude",
+         harness: "claude_agent_sdk",
+         model: "sonnet",
+         payload: %{"command" => "node bridge.mjs"}
+       }}
+    )
+
+    send(
+      pid,
+      {:codex_worker_update, issue_id,
+       %{
+         event: :session_started,
+         session_id: "sdk-session-live",
+         turn_id: "claude-turn-1",
+         timestamp: now,
+         provider: "claude",
+         harness: "claude_agent_sdk",
+         model: "sonnet",
+         payload: %{"tools" => ["Read", "Write"]}
+       }}
+    )
+
+    snapshot = GenServer.call(pid, :snapshot)
+    assert %{running: [snapshot_entry]} = snapshot
+    assert snapshot_entry.session_id == "sdk-session-live"
+    assert snapshot_entry.agent_provider == "claude"
+    assert snapshot_entry.agent_harness == "claude_agent_sdk"
+    assert snapshot_entry.agent_model == "sonnet"
+    assert snapshot_entry.turn_count == 1
+    assert snapshot_entry.last_runtime_event.event == :session_started
+
+    send(
+      pid,
+      {:codex_worker_update, issue_id,
+       %{
+         event: :turn_started,
+         session_id: "sdk-session-live",
+         turn_id: "claude-turn-2",
+         timestamp: DateTime.utc_now(),
+         provider: "claude",
+         harness: "claude_agent_sdk",
+         model: "sonnet",
+         payload: %{"command" => "node bridge.mjs", "resume" => "sdk-session-live"}
+       }}
+    )
+
+    send(
+      pid,
+      {:codex_worker_update, issue_id,
+       %{
+         event: :session_started,
+         session_id: "sdk-session-live",
+         turn_id: "claude-turn-2",
+         timestamp: DateTime.utc_now(),
+         provider: "claude",
+         harness: "claude_agent_sdk",
+         model: "sonnet",
+         payload: %{"tools" => ["Read", "Write"]}
+       }}
+    )
+
+    snapshot = GenServer.call(pid, :snapshot)
+    assert %{running: [snapshot_entry]} = snapshot
+    assert snapshot_entry.session_id == "sdk-session-live"
+    assert snapshot_entry.turn_count == 2
+    assert snapshot_entry.last_runtime_event.turn_id == "claude-turn-2"
+  end
+
   test "orchestrator snapshot tracks codex thread totals and app-server pid" do
     issue_id = "issue-usage-snapshot"
 

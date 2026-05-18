@@ -84,7 +84,7 @@ defmodule OrbitElixir.AgentProvider do
       "claude" => %{
         "name" => "claude",
         "display_name" => "Claude",
-        "harness" => "cli",
+        "harness" => "claude_agent_sdk",
         "command" => "claude -p --permission-mode acceptEdits --model \"$ORBIT_AGENT_MODEL\" \"$ORBIT_AGENT_PROMPT\"",
         "timeout_ms" => timeout_ms,
         "model" => "sonnet"
@@ -132,8 +132,8 @@ defmodule OrbitElixir.AgentProvider do
       not valid_provider_name?(name) ->
         {:error, {:invalid_agent_provider_config, "provider names must be non-empty strings"}}
 
-      harness not in ["codex_app_server", "cli"] ->
-        {:error, {:invalid_agent_provider_config, "providers.#{name}.harness must be codex_app_server or cli"}}
+      harness not in ["codex_app_server", "cli", "claude_agent_sdk"] ->
+        {:error, {:invalid_agent_provider_config, "providers.#{name}.harness must be codex_app_server, cli, or claude_agent_sdk"}}
 
       not is_binary(command) or command == "" ->
         {:error, {:invalid_agent_provider_config, "providers.#{name}.command can't be blank"}}
