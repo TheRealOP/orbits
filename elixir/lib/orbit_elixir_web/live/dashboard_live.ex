@@ -102,7 +102,7 @@ defmodule OrbitElixirWeb.DashboardLive do
           <article class="metric-card">
             <p class="metric-label">Runtime</p>
             <p class="metric-value numeric"><%= format_runtime_seconds(total_runtime_seconds(@payload, @now)) %></p>
-            <p class="metric-detail">Total Codex runtime across completed and active sessions.</p>
+            <p class="metric-detail">Total runtime across completed and active sessions.</p>
           </article>
         </section>
 
@@ -131,20 +131,24 @@ defmodule OrbitElixirWeb.DashboardLive do
             <div class="table-wrap">
               <table class="data-table data-table-running">
                 <colgroup>
-                  <col style="width: 12rem;" />
-                  <col style="width: 8rem;" />
+                  <col style="width: 10rem;" />
+                  <col style="width: 9rem;" />
                   <col style="width: 7.5rem;" />
+                  <col style="width: 14rem;" />
                   <col style="width: 8.5rem;" />
                   <col />
+                  <col style="width: 9rem;" />
                   <col style="width: 10rem;" />
                 </colgroup>
                 <thead>
                   <tr>
                     <th>Issue</th>
+                    <th>Provider</th>
                     <th>State</th>
-                    <th>Session</th>
+                    <th>Session / workspace</th>
                     <th>Runtime / turns</th>
-                    <th>Codex update</th>
+                    <th>Latest activity</th>
+                    <th>Error state</th>
                     <th>Tokens</th>
                   </tr>
                 </thead>
@@ -153,8 +157,13 @@ defmodule OrbitElixirWeb.DashboardLive do
                     <td>
                       <div class="issue-stack">
                         <span class="issue-id"><%= entry.issue_identifier %></span>
-                        <span class="muted"><%= provider_label(entry.provider) %></span>
                         <a class="issue-link" href={"/api/v1/#{entry.issue_identifier}"}>JSON details</a>
+                      </div>
+                    </td>
+                    <td>
+                      <div class="detail-stack">
+                        <span><%= provider_name(entry.runtime_status) %></span>
+                        <span class="muted"><%= adapter_type(entry.runtime_status) %></span>
                       </div>
                     </td>
                     <td>
@@ -177,6 +186,10 @@ defmodule OrbitElixirWeb.DashboardLive do
                         <% else %>
                           <span class="muted">n/a</span>
                         <% end %>
+                        <span
+                          class="muted mono workspace-path"
+                          title={workspace_path(entry.runtime_status)}
+                        ><%= workspace_path(entry.runtime_status) %></span>
                       </div>
                     </td>
                     <td class="numeric"><%= format_runtime_and_turns(entry.started_at, entry.turn_count, @now) %></td>
@@ -184,13 +197,23 @@ defmodule OrbitElixirWeb.DashboardLive do
                       <div class="detail-stack">
                         <span
                           class="event-text"
-                          title={entry.last_message || to_string(entry.last_event || "n/a")}
-                        ><%= entry.last_message || to_string(entry.last_event || "n/a") %></span>
+                          title={latest_message(entry.runtime_status)}
+                        ><%= latest_message(entry.runtime_status) %></span>
                         <span class="muted event-meta">
-                          <%= entry.last_event || "n/a" %>
+                          <%= latest_event(entry.runtime_status) %>
                           <%= if entry.last_event_at do %>
                             · <span class="mono numeric"><%= entry.last_event_at %></span>
                           <% end %>
+                        </span>
+                      </div>
+                    </td>
+                    <td>
+                      <div class="detail-stack">
+                        <span class={error_state_badge_class(entry.runtime_status)}>
+                          <%= error_state(entry.runtime_status) %>
+                        </span>
+                        <span :if={entry.runtime_status.error_message} class="muted event-text" title={entry.runtime_status.error_message}>
+                          <%= entry.runtime_status.error_message %>
                         </span>
                       </div>
                     </td>
@@ -322,13 +345,39 @@ defmodule OrbitElixirWeb.DashboardLive do
     end
   end
 
-  defp provider_label(%{name: name, harness: harness}) when is_binary(name) and name != "" do
-    [name, harness]
-    |> Enum.filter(&(is_binary(&1) and &1 != ""))
-    |> Enum.join(" / ")
+  defp provider_name(%{provider_name: name}) when is_binary(name) and name != "", do: name
+  defp provider_name(_runtime_status), do: "provider n/a"
+
+  defp adapter_type(%{adapter_type: adapter_type}) when is_binary(adapter_type) and adapter_type != "",
+    do: adapter_type
+
+  defp adapter_type(_runtime_status), do: "adapter n/a"
+
+  defp workspace_path(%{workspace_path: path}) when is_binary(path) and path != "", do: path
+  defp workspace_path(_runtime_status), do: "workspace n/a"
+
+  defp latest_event(%{latest_event: event}) when is_binary(event) and event != "", do: event
+  defp latest_event(_runtime_status), do: "n/a"
+
+  defp latest_message(%{latest_message: message}) when is_binary(message) and message != "", do: message
+  defp latest_message(_runtime_status), do: "n/a"
+
+  defp error_state(%{error_state: state}) when is_binary(state) and state != "" do
+    state
   end
 
-  defp provider_label(_provider), do: "provider n/a"
+  defp error_state(_runtime_status), do: "unknown"
+
+  defp error_state_badge_class(runtime_status) do
+    base = "state-badge"
+
+    case error_state(runtime_status) do
+      "ok" -> "#{base} state-badge-active"
+      "cancelled" -> "#{base} state-badge-warning"
+      "error" -> "#{base} state-badge-danger"
+      _ -> base
+    end
+  end
 
   defp schedule_runtime_tick do
     Process.send_after(self(), :runtime_tick, @runtime_tick_ms)

@@ -306,7 +306,7 @@ pre,
 
 .data-table-running {
   table-layout: fixed;
-  min-width: 980px;
+  min-width: 1260px;
 }
 
 .data-table th {
@@ -345,6 +345,14 @@ pre,
 }
 
 .event-meta {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-path {
+  display: block;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
