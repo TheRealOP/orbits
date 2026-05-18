@@ -93,9 +93,12 @@ defmodule OrbitElixir.AgentProvider do
         "name" => "gemini",
         "display_name" => "Gemini",
         "harness" => "cli",
-        "command" => "gemini --approval-mode=auto_edit --model \"$ORBIT_AGENT_MODEL\" -p \"$ORBIT_AGENT_PROMPT\"",
+        "command" =>
+          "gemini --skip-trust --approval-mode=yolo --model \"$ORBIT_AGENT_MODEL\" " <>
+            "--prompt \"$ORBIT_AGENT_PROMPT\" --output-format json",
         "timeout_ms" => timeout_ms,
-        "model" => "auto"
+        "model" => "auto",
+        "output_format" => "json"
       }
     }
   end
