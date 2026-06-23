@@ -1,0 +1,332 @@
+# Orbit Elixir
+
+This directory contains the current Elixir/OTP implementation of Orbit, based on
+[`SPEC.md`](../SPEC.md) at the repository root.
+
+> [!WARNING]
+> Orbit Elixir is prototype software intended for evaluation only and is presented as-is.
+> We recommend implementing your own hardened version based on `SPEC.md`.
+
+## Screenshot
+
+![Orbit Elixir screenshot](../.github/media/elixir-screenshot.png)
+
+## How it works
+
+1. Polls Linear for candidate work
+2. Creates a workspace per issue
+3. Selects an agent provider for the issue, defaulting to Codex and routing UI/UX work to Gemini
+4. Launches the selected provider inside the workspace
+5. Sends a workflow prompt to the selected agent
+6. Keeps the agent working on the issue until the work is done
+
+During Codex app-server sessions, Orbit also serves a client-side `linear_graphql` tool so that
+repo skills can make raw Linear GraphQL calls.
+
+If a claimed issue moves to a terminal state (`Done`, `Closed`, `Cancelled`, or `Duplicate`),
+Orbit stops the active agent for that issue and cleans up matching workspaces.
+
+## How to use it
+
+1. Make sure your codebase is set up to work well with agents: see
+   [Harness engineering](https://openai.com/index/harness-engineering/).
+2. Get a new personal token in Linear via Settings → Security & access → Personal API keys, and
+   set it as the `LINEAR_API_KEY` environment variable.
+3. Copy this directory's `WORKFLOW.md` to your repo.
+4. Optionally copy the `commit`, `push`, `pull`, `land`, and `linear` skills to your repo.
+   - The `linear` skill expects Orbit's `linear_graphql` app-server tool for raw Linear GraphQL
+     operations such as comment editing or upload flows.
+5. Customize the copied `WORKFLOW.md` file for your project.
+   - To get your project's slug, right-click the project and copy its URL. The slug is part of the
+     URL.
+   - When creating a workflow based on this repo, note that it depends on non-standard Linear
+     issue statuses: "Rework", "Human Review", and "Merging". You can customize them in
+     Team Settings → Workflow in Linear.
+6. Follow the instructions below to install the required runtime dependencies and start the service.
+
+## Prerequisites
+
+We recommend using [mise](https://mise.jdx.dev/) to manage Elixir/Erlang versions.
+
+```bash
+mise install
+mise exec -- elixir --version
+```
+
+## Provider Runtime Setup
+
+Orbit starts one agent provider inside each issue workspace. The worker host that runs Orbit, or
+each SSH worker host configured under `worker.ssh_hosts`, must have the selected provider tools
+installed and authenticated before you start `./bin/orbit`.
+
+Codex app-server remains the default runtime. Claude Agent SDK is the preferred long-term Claude
+runtime, with the Claude CLI command kept as its fallback. Gemini is currently backed by the Gemini
+CLI in headless mode, not by a Gemini SDK or long-running server.
+
+Required local setup:
+
+- Set `LINEAR_API_KEY` to a Linear personal API key before starting Orbit. `tracker.api_key`
+  defaults to that environment variable when omitted or set to `$LINEAR_API_KEY`.
+- Install `bash` and `git` on every worker. Provider commands are launched through `bash -lc` in
+  the issue workspace, and local diff reporting uses `git diff`.
+- Install and authenticate every provider that routing can select on the workers that may receive
+  those issues. A missing provider executable or missing provider auth fails the agent turn.
+- If you use SSH workers, make sure each remote host has the same provider tools, credentials,
+  repository access, and workspace paths expected by your hooks.
+
+Provider modes:
+
+- `codex` uses the `codex_app_server` harness and `codex.command`, which defaults to
+  `codex app-server`. Install a Codex CLI version that supports app-server mode and authenticate
+  Codex on every worker that can run Codex issues. Codex receives Orbit's client-side
+  `linear_graphql` dynamic tool during app-server sessions. Codex approval and sandbox values are
+  passed through from `codex.approval_policy`, `codex.thread_sandbox`, and
+  `codex.turn_sandbox_policy`, so compatibility depends on the installed Codex app-server schema.
+- `claude` uses the `claude_agent_sdk` harness by default. The SDK adapter runs the Node bridge at
+  `priv/claude_agent_sdk/bridge.mjs` unless `providers.claude.sdk_command` points to another
+  compatible bridge command. Install Node.js and the bridge dependency before selecting this
+  harness:
+
+  ```bash
+  cd elixir/priv/claude_agent_sdk
+  npm install
+  ```
+
+  Claude workers also need usable Claude auth, such as `ANTHROPIC_API_KEY`, supported cloud-provider
+  credentials, or a preseeded Claude configuration that the SDK can read. The provider can set
+  `permission_mode`, `allowed_tools`, `disallowed_tools`, `setting_sources`,
+  `path_to_claude_code_executable`, and `env` for the SDK request. If the SDK session fails to
+  start, or a non-cancelled SDK turn fails, Orbit falls back to the same provider's `command` with
+  the generic CLI harness, so install and authenticate the `claude` CLI if you want that fallback.
+  The SDK harness currently runs only on local workers; remote SSH Claude SDK sessions are rejected.
+- `gemini` uses the generic `cli` harness. The built-in command runs Gemini headlessly with
+  `--prompt "$ORBIT_AGENT_PROMPT"`, `--output-format json`, `--skip-trust`, and
+  `--approval-mode=yolo`. Install and authenticate the Gemini CLI according to the auth mode you
+  use for that CLI. Keep Gemini commands non-interactive and JSON-producing if you want Orbit to
+  parse structured completion, error, timeout, and usage information. Gemini is one-shot
+  CLI/headless-backed for now; there is no Gemini SDK or app-server adapter in Orbit yet.
+- Custom CLI providers use `harness: cli` and a shell `command`. Orbit injects
+  `ORBIT_AGENT_PROMPT`, `ORBIT_AGENT_PROVIDER`, `ORBIT_AGENT_HARNESS`, `ORBIT_AGENT_MODEL`, and
+  `ORBIT_ISSUE_IDENTIFIER` into the provider process environment. Set `output_format: json` or
+  `output_format: stream-json` when the command emits structured output that Orbit should parse.
+
+Known limitations:
+
+- Codex is the only built-in provider that currently receives Orbit's app-server dynamic
+  `linear_graphql` tool. SDK and CLI providers must rely on their own installed tools, MCP setup,
+  provider capabilities, or the workflow prompt.
+- CLI providers are short-lived command invocations. They do not expose Codex-style live
+  thread/turn protocol semantics, and any command that waits for interactive input can stall until
+  `timeout_ms`.
+- Remote CLI and Codex sessions can run over SSH, but runtime diff extraction is local-only today
+  for the generic CLI adapter. Claude SDK remote execution is not supported yet.
+
+Choosing defaults and routes:
+
+- Keep `agent.default_provider: codex` unless every worker has another provider installed,
+  authenticated, and validated for unattended execution. This is the current default and safest
+  baseline because Codex app-server is the most complete Orbit integration.
+- Use `agent.provider_routes` for work that benefits from a specialized provider. Routes are
+  ordered and match by normalized Linear labels or keywords in the issue title/body. Your configured
+  routes run before Orbit's built-in routes.
+- Built-in routes send UI/UX, frontend, layout, visual, and accessibility work to Gemini; send
+  analysis, documentation, research, review, and strategy work to Claude; and otherwise fall back to
+  Codex.
+- Every route's `provider` must name a built-in provider or a configured entry under `providers`.
+  If a provider lacks required local tools or credentials, remove that route or keep Codex as the
+  default until the worker image is ready.
+
+## Run
+
+```bash
+git clone https://github.com/TheRealOP/orbits
+cd orbits/elixir
+mise trust
+mise install
+mise exec -- mix setup
+mise exec -- mix build
+mise exec -- ./bin/orbit ./WORKFLOW.md
+```
+
+## Configuration
+
+Pass a custom workflow file path to `./bin/orbit` when starting the service:
+
+```bash
+./bin/orbit /path/to/custom/WORKFLOW.md
+```
+
+If no path is passed, Orbit defaults to `./WORKFLOW.md`.
+
+Optional flags:
+
+- `--logs-root` tells Orbit to write logs under a different directory (default: `./log`)
+- `--port` also starts the Phoenix observability service (default: disabled)
+
+The `WORKFLOW.md` file uses YAML front matter for configuration, plus a Markdown body used as the
+agent session prompt.
+
+Minimal example:
+
+```md
+---
+tracker:
+  kind: linear
+  project_slug: "..."
+workspace:
+  root: ~/code/workspaces
+hooks:
+  after_create: |
+    git clone git@github.com:your-org/your-repo.git .
+agent:
+  max_concurrent_agents: 10
+  max_turns: 20
+  default_provider: codex
+codex:
+  command: codex app-server
+providers:
+  claude:
+    harness: claude_agent_sdk
+    command: claude -p --permission-mode acceptEdits --model "$ORBIT_AGENT_MODEL" "$ORBIT_AGENT_PROMPT"
+    model: sonnet
+  gemini:
+    harness: cli
+    command: gemini --skip-trust --approval-mode=yolo --model "$ORBIT_AGENT_MODEL" --prompt "$ORBIT_AGENT_PROMPT" --output-format json
+    model: auto
+    output_format: json
+---
+
+You are working on a Linear issue {{ issue.identifier }}.
+
+Title: {{ issue.title }} Body: {{ issue.description }}
+```
+
+Notes:
+
+- If a value is missing, defaults are used.
+- Safer Codex defaults are used when policy fields are omitted:
+  - `codex.approval_policy` defaults to `{"reject":{"sandbox_approval":true,"rules":true,"mcp_elicitations":true}}`
+  - `codex.thread_sandbox` defaults to `workspace-write`
+  - `codex.turn_sandbox_policy` defaults to a `workspaceWrite` policy rooted at the current issue workspace
+- Supported `codex.approval_policy` values depend on the targeted Codex app-server version. In the current local Codex schema, string values include `untrusted`, `on-failure`, `on-request`, and `never`, and object-form `reject` is also supported.
+- Supported `codex.thread_sandbox` values: `read-only`, `workspace-write`, `danger-full-access`.
+- When `codex.turn_sandbox_policy` is set explicitly, Orbit passes the map through to Codex
+  unchanged. Compatibility then depends on the targeted Codex app-server version rather than local
+  Orbit validation.
+- `agent.max_turns` caps how many back-to-back agent turns Orbit will run in a single agent
+  invocation when a turn completes normally but the issue is still in an active state. Default: `20`.
+- `agent.default_provider` defaults to `codex`. Built-in providers are `codex`, `claude`, and
+  `gemini`; add custom entries under `providers` for additional CLI-based harnesses. Claude uses
+  the `claude_agent_sdk` harness by default and keeps `command` as its CLI fallback.
+- `agent.provider_routes` can add ordered route rules with `provider`, `labels`, and `keywords`.
+  Built-in routes send UI/UX, frontend, layout, visual, and accessibility tasks to Gemini, send
+  analysis/docs/research/review tasks to Claude, and fall back to Codex.
+- Claude Agent SDK support uses the TypeScript `@anthropic-ai/claude-agent-sdk` bridge in
+  `priv/claude_agent_sdk`. Install that package in the bridge directory before selecting the SDK
+  harness on a worker, or set `providers.claude.sdk_command` to an alternate Node command that
+  streams the same bridge frames.
+- Gemini is currently backed by the Gemini CLI in headless mode, not a Gemini SDK or long-running
+  server. The built-in provider uses `--prompt`, `--output-format json`, `--skip-trust`, and
+  `--approval-mode=yolo` so Orbit can run it non-interactively and parse structured completion,
+  error, timeout, and diff reporting. Keep custom Gemini commands JSON-producing if you want the
+  normalized result extraction.
+- CLI providers receive `ORBIT_AGENT_PROMPT`, `ORBIT_AGENT_PROVIDER`,
+  `ORBIT_AGENT_MODEL`, and `ORBIT_ISSUE_IDENTIFIER` in their environment.
+- If the Markdown body is blank, Orbit uses a default prompt template that includes the issue
+  identifier, title, and body.
+- Use `hooks.after_create` to bootstrap a fresh workspace. For a Git-backed repo, you can run
+  `git clone ... .` there, along with any other setup commands you need.
+- If a hook needs `mise exec` inside a freshly cloned workspace, trust the repo config and fetch
+  the project dependencies in `hooks.after_create` before invoking `mise` later from other hooks.
+- `tracker.api_key` reads from `LINEAR_API_KEY` when unset or when value is `$LINEAR_API_KEY`.
+- For path values, `~` is expanded to the home directory.
+- For env-backed path values, use `$VAR`. `workspace.root` resolves `$VAR` before path handling,
+  while `codex.command` stays a shell command string and any `$VAR` expansion there happens in the
+  launched shell.
+
+```yaml
+tracker:
+  api_key: $LINEAR_API_KEY
+workspace:
+  root: $ORBIT_WORKSPACE_ROOT
+hooks:
+  after_create: |
+    git clone --depth 1 "$SOURCE_REPO_URL" .
+codex:
+  command: "$CODEX_BIN --config 'model=\"gpt-5.5\"' app-server"
+```
+
+- If `WORKFLOW.md` is missing or has invalid YAML at startup, Orbit does not boot.
+- If a later reload fails, Orbit keeps running with the last known good workflow and logs the
+  reload error until the file is fixed.
+- `server.port` or CLI `--port` enables the optional Phoenix LiveView dashboard and JSON API at
+  `/`, `/api/v1/state`, `/api/v1/<issue_identifier>`, and `/api/v1/refresh`.
+
+## Web dashboard
+
+The observability UI now runs on a minimal Phoenix stack:
+
+- LiveView for the dashboard at `/`
+- JSON API for operational debugging under `/api/v1/*`
+- Bandit as the HTTP server
+- Phoenix dependency static assets for the LiveView client bootstrap
+
+## Project Layout
+
+- `lib/`: application code and Mix tasks
+- `test/`: ExUnit coverage for runtime behavior
+- `WORKFLOW.md`: in-repo workflow contract used by local runs
+- `../.codex/`: repository-local Codex skills and setup helpers
+
+## Testing
+
+```bash
+make all
+```
+
+Run the real external end-to-end test only when you want Orbit to create disposable Linear
+resources and launch a real `codex app-server` session:
+
+```bash
+cd elixir
+export LINEAR_API_KEY=...
+make e2e
+```
+
+Optional environment variables:
+
+- `ORBIT_LIVE_LINEAR_TEAM_KEY` defaults to `ORBE2E`
+- `ORBIT_LIVE_SSH_WORKER_HOSTS` uses those SSH hosts when set, as a comma-separated list
+
+`make e2e` runs two live scenarios:
+- one with a local worker
+- one with SSH workers
+
+If `ORBIT_LIVE_SSH_WORKER_HOSTS` is unset, the SSH scenario uses `docker compose` to start two
+disposable SSH workers on `localhost:<port>`. The live test generates a temporary SSH keypair,
+mounts the host `~/.codex/auth.json` into each worker, verifies that Orbit can talk to them
+over real SSH, then runs the same orchestration flow against those worker addresses. This keeps
+the transport representative without depending on long-lived external machines.
+
+Set `ORBIT_LIVE_SSH_WORKER_HOSTS` if you want `make e2e` to target real SSH hosts instead.
+
+The live test creates a temporary Linear project and issue, writes a temporary `WORKFLOW.md`, runs
+a real agent turn, verifies the workspace side effect, requires Codex to comment on and close the
+Linear issue, then marks the project completed so the run remains visible in Linear.
+
+## FAQ
+
+### Why Elixir?
+
+Elixir is built on Erlang/BEAM/OTP, which is great for supervising long-running processes. It has an
+active ecosystem of tools and libraries. It also supports hot code reloading without stopping
+actively running subagents, which is very useful during development.
+
+### What's the easiest way to set this up for my own codebase?
+
+Launch `codex` in your repo, give it the URL to the Orbit repo, and ask it to set things up for
+you.
+
+## License
+
+This project is licensed under the [Apache License 2.0](../LICENSE).
